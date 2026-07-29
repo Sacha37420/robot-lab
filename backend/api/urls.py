@@ -1,8 +1,12 @@
-from django.urls import path
-from .views import MeView, DepartmentListView, UserListView
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from .views import AIProviderConfigView, RobotViewSet
+
+router = DefaultRouter()
+router.register('robots', RobotViewSet, basename='robot')
 
 urlpatterns = [
-    path('me/',          MeView.as_view()),
-    path('departments/', DepartmentListView.as_view()),
-    path('users/',       UserListView.as_view()),
+    path('ai-config/<str:provider>/', AIProviderConfigView.as_view()),
+    path('', include(router.urls)),
 ]

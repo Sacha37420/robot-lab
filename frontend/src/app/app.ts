@@ -32,8 +32,9 @@ export class AppComponent {
   protected closeMobileFn = (): void => this.closeMobile();
 
   readonly navItems: NavItem[] = [
-    { path: '/',        label: 'Accueil', abbr: 'Ac', exact: true },
-    { path: '/profile', label: 'Profil',  abbr: 'Pr' },
+    { path: '/',            label: 'Accueil',     abbr: 'Ac', exact: true },
+    { path: '/robots',      label: 'Robots',      abbr: 'Ro' },
+    { path: '/parametrage', label: 'Paramétrage', abbr: 'Pa' },
   ];
 
   @ViewChild('closeBtn') private closeBtnRef?: ElementRef<HTMLButtonElement>;

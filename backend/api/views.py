@@ -1,50 +1,47 @@
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import generics
+from rest_framework import viewsets
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
-from .models import Department, UserRecord
-from .serializers import DepartmentSerializer, UserRecordSerializer
+from rest_framework.views import APIView
+
+from .models import PROVIDER_CHOICES, AIProviderConfig, Robot
+from .serializers import AIProviderConfigSerializer, RobotSerializer
+
+_VALID_PROVIDERS = {key for key, _ in PROVIDER_CHOICES}
 
 
-class MeView(APIView):
+class RobotViewSet(viewsets.ModelViewSet):
+    """CRUD des robots — chacun ne voit et ne modifie que les siens."""
+
+    serializer_class = RobotSerializer
+
+    def get_queryset(self):
+        return Robot.objects.filter(owner_email=self.request.user.email)
+
+    def perform_create(self, serializer):
+        serializer.save(owner_email=self.request.user.email)
+
+
+class AIProviderConfigView(APIView):
     """
-    permission_classes = [IsAuthenticated]
-    GET /api/me/
-    Retourne l'identité de l'utilisateur authentifié (depuis le JWT + DB).
-    Crée un UserRecord à la première visite.
+    GET/PUT /api/ai-config/<provider>/ — configuration IA de l'utilisateur courant
+    pour un fournisseur donné (claude ou mistral).
     """
 
-    def get(self, request):
-        email    = request.user.email
-        username = request.user.username
-        groups   = request.user.claims.get('groups', [])
-
-        record, created = UserRecord.objects.get_or_create(
-            email=email,
-            defaults={'display_name': username},
+    def _get_or_create(self, request, provider):
+        if provider not in _VALID_PROVIDERS:
+            raise NotFound(f"Fournisseur inconnu : '{provider}'.")
+        config, _ = AIProviderConfig.objects.get_or_create(
+            owner_email=request.user.email, provider=provider,
         )
+        return config
 
-        return Response({
-            'email':        email,
-            'username':     username,
-            'groups':       groups,
-            'display_name': record.display_name,
-            'department':   DepartmentSerializer(record.department).data
-                            if record.department else None,
-            'registered_at': record.registered_at,
-            'is_new':        created,
-        })
+    def get(self, request, provider):
+        config = self._get_or_create(request, provider)
+        return Response(AIProviderConfigSerializer(config).data)
 
-
-class DepartmentListView(generics.ListAPIView):
-    """GET /api/departments/ — liste tous les départements."""
-
-    queryset         = Department.objects.all()
-    serializer_class = DepartmentSerializer
-
-
-class UserListView(generics.ListAPIView):
-    """GET /api/users/ — liste tous les utilisateurs enregistrés."""
-
-    queryset         = UserRecord.objects.select_related('department')
-    serializer_class = UserRecordSerializer
+    def put(self, request, provider):
+        config = self._get_or_create(request, provider)
+        serializer = AIProviderConfigSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(AIProviderConfigSerializer(config).data)

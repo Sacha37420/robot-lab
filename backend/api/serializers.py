@@ -1,18 +1,28 @@
 from rest_framework import serializers
-from .models import Department, UserRecord
+
+from .models import AIProviderConfig, Robot
 
 
-class DepartmentSerializer(serializers.ModelSerializer):
-    member_count = serializers.IntegerField(source='members.count', read_only=True)
+class AIProviderConfigSerializer(serializers.ModelSerializer):
+    """La clé API est en écriture seule : jamais renvoyée déchiffrée au frontend."""
 
-    class Meta:
-        model = Department
-        fields = ['id', 'name', 'description', 'member_count']
-
-
-class UserRecordSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
+    api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    has_key = serializers.SerializerMethodField()
 
     class Meta:
-        model = UserRecord
-        fields = ['email', 'display_name', 'department', 'registered_at']
+        model = AIProviderConfig
+        fields = ['provider', 'api_key', 'model_name', 'has_key', 'updated_at']
+        read_only_fields = ['provider', 'updated_at']
+
+    def get_has_key(self, obj) -> bool:
+        return bool(obj.api_key)
+
+
+class RobotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Robot
+        fields = [
+            'id', 'name', 'description', 'start_url', 'steps',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'steps', 'created_at', 'updated_at']

@@ -1,0 +1,58 @@
+<main class="page-parametrage">
+  <h2>Paramétrage IA</h2>
+  <p class="intro">
+    Renseignez une clé API par fournisseur. Chaque clé est propre à votre compte et
+    chiffrée en base — elle n'est jamais réaffichée une fois enregistrée.
+  </p>
+
+  <div class="cards">
+    @for (card of cards(); track card.provider) {
+      <section class="card">
+        <div class="card-head">
+          <h3>{{ card.label }}</h3>
+          @if (card.config?.has_key) {
+            <span class="badge badge-ok">Clé enregistrée</span>
+          } @else {
+            <span class="badge badge-off">Aucune clé</span>
+          }
+        </div>
+
+        <label class="field">
+          <span>Clé API</span>
+          <input
+            type="password"
+            [(ngModel)]="card.apiKeyInput"
+            [placeholder]="card.config?.has_key ? '••••••••••••••••' : 'Coller la clé API'"
+            autocomplete="off"
+          />
+        </label>
+
+        <label class="field">
+          <span>Modèle (optionnel)</span>
+          <input
+            type="text"
+            [(ngModel)]="card.modelNameInput"
+            [placeholder]="card.modelPlaceholder"
+          />
+        </label>
+
+        @if (card.error) {
+          <p class="error">{{ card.error }}</p>
+        }
+        @if (card.saved) {
+          <p class="saved">Enregistré.</p>
+        }
+        @if (card.config?.updated_at) {
+          <p class="updated">Dernière mise à jour : {{ card.config?.updated_at | date:'dd/MM/yyyy HH:mm' }}</p>
+        }
+
+        <button
+          type="button"
+          class="btn-primary"
+          [disabled]="card.saving"
+          (click)="save(card.provider)"
+        >{{ card.saving ? 'Enregistrement…' : 'Enregistrer' }}</button>
+      </section>
+    }
+  </div>
+</main>

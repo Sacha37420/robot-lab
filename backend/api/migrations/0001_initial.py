@@ -1,6 +1,7 @@
-from django.db import migrations, models
 import django.db.models.deletion
-import django.utils.timezone
+from django.db import migrations, models
+
+import api.fields
 
 
 class Migration(migrations.Migration):
@@ -11,34 +12,39 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='Department',
+            name='AIProviderConfig',
             fields=[
                 ('id',          models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
-                ('name',        models.CharField(max_length=100, unique=True)),
-                ('description', models.TextField(blank=True)),
+                ('owner_email', models.EmailField(max_length=254)),
+                ('provider',    models.CharField(choices=[('claude', 'Claude'), ('mistral', 'Mistral')], max_length=20)),
+                ('api_key',     api.fields.EncryptedTextField(blank=True)),
+                ('model_name',  models.CharField(blank=True, max_length=100)),
+                ('updated_at',  models.DateTimeField(auto_now=True)),
             ],
             options={
-                'db_table': 'departments',
-                'ordering': ['name'],
+                'db_table': 'ai_provider_configs',
+                'ordering': ['provider'],
             },
         ),
         migrations.CreateModel(
-            name='UserRecord',
+            name='Robot',
             fields=[
-                ('email',         models.EmailField(max_length=255, primary_key=True, serialize=False)),
-                ('display_name',  models.CharField(blank=True, max_length=200)),
-                ('registered_at', models.DateTimeField(default=django.utils.timezone.now)),
-                ('department',    models.ForeignKey(
-                    blank=True,
-                    null=True,
-                    on_delete=django.db.models.deletion.SET_NULL,
-                    related_name='members',
-                    to='api.department',
-                )),
+                ('id',          models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                ('owner_email', models.EmailField(max_length=254)),
+                ('name',        models.CharField(max_length=150)),
+                ('description', models.TextField(blank=True)),
+                ('start_url',   models.URLField()),
+                ('steps',       models.JSONField(blank=True, default=list)),
+                ('created_at',  models.DateTimeField(auto_now_add=True)),
+                ('updated_at',  models.DateTimeField(auto_now=True)),
             ],
             options={
-                'db_table': 'user_records',
-                'ordering': ['email'],
+                'db_table': 'robots',
+                'ordering': ['-updated_at'],
             },
+        ),
+        migrations.AlterUniqueTogether(
+            name='aiproviderconfig',
+            unique_together={('owner_email', 'provider')},
         ),
     ]

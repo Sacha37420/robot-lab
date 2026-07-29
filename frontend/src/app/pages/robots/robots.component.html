@@ -1,0 +1,68 @@
+<main class="page-robots">
+  <div class="page-head">
+    <h2>Robots</h2>
+    <button type="button" class="btn-primary" (click)="openCreate()">+ Nouveau robot</button>
+  </div>
+
+  @if (error()) {
+    <p class="error">{{ error() }}</p>
+  }
+
+  @if (formOpen()) {
+    <section class="card form-card">
+      <h3>{{ editingId() === null ? 'Nouveau robot' : 'Modifier le robot' }}</h3>
+
+      <label class="field">
+        <span>Nom</span>
+        <input type="text" [(ngModel)]="form.name" placeholder="ex. Suivi colis" />
+      </label>
+
+      <label class="field">
+        <span>Description</span>
+        <textarea rows="3" [(ngModel)]="form.description" placeholder="Ce que fait ce robot"></textarea>
+      </label>
+
+      <label class="field">
+        <span>URL de départ</span>
+        <input type="url" [(ngModel)]="form.start_url" placeholder="https://…" />
+      </label>
+
+      @if (formError()) {
+        <p class="error">{{ formError() }}</p>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" (click)="cancelForm()">Annuler</button>
+        <button type="button" class="btn-primary" [disabled]="saving()" (click)="submitForm()">
+          {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
+        </button>
+      </div>
+    </section>
+  }
+
+  @if (loading()) {
+    <p class="loading">Chargement…</p>
+  } @else {
+    <div class="robot-list">
+      @for (robot of robots(); track robot.id) {
+        <section class="card robot-card">
+          <div class="robot-head">
+            <h3>{{ robot.name }}</h3>
+            <span class="updated">{{ robot.updated_at | date:'dd/MM/yyyy' }}</span>
+          </div>
+          @if (robot.description) {
+            <p class="description">{{ robot.description }}</p>
+          }
+          <a [href]="robot.start_url" target="_blank" rel="noopener" class="start-url">{{ robot.start_url }}</a>
+          <div class="robot-actions">
+            <button type="button" class="btn-secondary" (click)="openEdit(robot)">Modifier</button>
+            <button type="button" class="btn-danger" (click)="remove(robot)">Supprimer</button>
+          </div>
+        </section>
+      }
+      @if (robots().length === 0) {
+        <p class="empty">Aucun robot pour l'instant — créez-en un.</p>
+      }
+    </div>
+  }
+</main>

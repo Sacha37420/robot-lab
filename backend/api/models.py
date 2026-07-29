@@ -1,37 +1,54 @@
 from django.db import models
 
+from .fields import EncryptedTextField
 
-class Department(models.Model):
-    """Département ou équipe de l'organisation."""
+PROVIDER_CHOICES = [
+    ('claude', 'Claude'),
+    ('mistral', 'Mistral'),
+]
 
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
+
+class AIProviderConfig(models.Model):
+    """Clé API d'un fournisseur IA, propre à un utilisateur.
+
+    Une config par (utilisateur, fournisseur) : chacun garde sa propre clé Claude
+    et/ou Mistral — pas de clé partagée pour tout le lab, pour qu'un run ne soit
+    jamais facturé sur la clé d'un tiers.
+    """
+
+    owner_email = models.EmailField()
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    api_key = EncryptedTextField(blank=True)
+    model_name = models.CharField(max_length=100, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'departments'
-        ordering = ['name']
+        db_table = 'ai_provider_configs'
+        unique_together = [('owner_email', 'provider')]
+        ordering = ['provider']
+
+    def __str__(self) -> str:
+        return f'{self.owner_email} — {self.provider}'
+
+
+class Robot(models.Model):
+    """Un robot de navigation : identité + parcours enregistré.
+
+    `steps` est rempli à partir du Lot 2 (moteur d'enregistrement) — en Lot 1 il
+    reste une liste vide, la création se limite au nom/description/URL de départ.
+    """
+
+    owner_email = models.EmailField()
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    start_url = models.URLField()
+    steps = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'robots'
+        ordering = ['-updated_at']
 
     def __str__(self) -> str:
         return self.name
-
-
-class UserRecord(models.Model):
-    """Enregistrement d'un utilisateur Keycloak, créé automatiquement à la première connexion."""
-
-    email = models.EmailField(primary_key=True, max_length=255)
-    display_name = models.CharField(max_length=200, blank=True)
-    department = models.ForeignKey(
-        Department,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='members',
-    )
-    registered_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'user_records'
-        ordering = ['email']
-
-    def __str__(self) -> str:
-        return self.display_name or self.email
