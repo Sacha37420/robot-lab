@@ -10,6 +10,7 @@ type EngineMessage =
   | { type: 'progress'; index: number; total: number; label: string }
   | { type: 'ai_action'; turn: number; total: number; label: string; reasoning: string }
   | { type: 'ai_done'; note: string }
+  | { type: 'note'; index: number; note: string }
   | { type: 'download'; name: string; size: number }
   | { type: 'failed'; index: number; label: string; message: string }
   | { type: 'finished'; total: number }
@@ -143,6 +144,14 @@ export class RunComponent implements OnInit, OnDestroy {
       case 'ai_done':
         this.log.update(lines => [...lines, {
           label: `IA : ${msg.note}`, state: 'done', ai: true,
+        }]);
+        break;
+
+      // Le rejeu a réussi mais s'est écarté du chemin nominal : on l'affiche
+      // sous l'étape concernée plutôt que de laisser croire à un run parfait.
+      case 'note':
+        this.log.update(lines => [...lines, {
+          label: `Étape ${msg.index} — ${msg.note}`, state: 'done', ai: true,
         }]);
         break;
 

@@ -35,10 +35,66 @@ export function captureInit() {
     if (window.__robotLabRecord__) window.__robotLabRecord__(payload);
   };
 
+  // Éléments qui font office de contrôle : quand le clic tombe à l'intérieur de
+  // l'un d'eux (sur le <span> d'un bouton, par ex.), c'est LUI qu'on veut viser,
+  // pas le nœud exact touché — son sélecteur est plus stable.
+  const CONTROL = [
+    'a[href]', 'button', 'input[type="submit"]', 'input[type="button"]',
+    'summary', 'label', 'option',
+    '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+    '[role="option"]', '[role="checkbox"]', '[role="radio"]', '[role="switch"]',
+    'li', '[onclick]', '[tabindex]',
+  ].join(',');
+
+  // TOUS les clics délibérés sont enregistrés, pas seulement ceux qui atterrissent
+  // sur un <button>/<a>. La version précédente filtrait sur une courte liste et
+  // abandonnait le reste en silence : un onglet, un accordéon ou un sélecteur
+  // maison en <div> n'était jamais capturé, et le rejeu échouait plus loin sur un
+  // élément resté caché — sans que rien n'indique l'étape manquante.
   document.addEventListener('click', (event) => {
-    const el = event.target.closest('a, button, [role="button"], input[type="submit"], input[type="button"]');
-    if (!el) return;
-    send({ action: 'click', selector: computeSelector(el), text: textOf(el) });
+    const node = event.target;
+    if (!(node instanceof Element)) return;
+    // Un clic dans le vide (fond de page) ne décrit aucune intention reproductible.
+    if (node === document.body || node === document.documentElement) return;
+
+    const target = node.closest(CONTROL) || node;
+    const rect = target.getBoundingClientRect();
+
+    const step = { action: 'click', selector: computeSelector(target), text: textOf(target) };
+
+    // Point d'impact DANS l'élément, plus ses dimensions au moment du clic. Le
+    // centre ne suffit pas partout : canevas, carte, curseur, barre de
+    // progression, grande zone cliquable dont seule une partie réagit. Les
+    // dimensions permettent de replacer le point si l'élément n'a pas la même
+    // taille au rejeu.
+    if (rect.width > 0 && rect.height > 0) {
+      step.position = {
+        x: Math.round(event.clientX - rect.left),
+        y: Math.round(event.clientY - rect.top),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+      };
+    }
+    send(step);
+  }, true);
+
+  // Défilement : utile pour les pages qui chargent au fur et à mesure (liste
+  // infinie) — sans ce geste rejoué, le contenu attendu plus bas n'existe jamais.
+  // Playwright fait défiler tout seul pour atteindre un élément DÉJÀ présent ;
+  // ce qu'il ne peut pas deviner, c'est qu'il faut défiler pour le faire exister.
+  let scrollTimer = null;
+  let lastScroll = { x: 0, y: 0 };
+  window.addEventListener('scroll', () => {
+    clearTimeout(scrollTimer);
+    // Anti-rafale : un geste de molette émet des dizaines d'évènements, on ne
+    // garde que la position d'arrivée.
+    scrollTimer = setTimeout(() => {
+      const x = Math.round(window.scrollX);
+      const y = Math.round(window.scrollY);
+      if (Math.abs(x - lastScroll.x) < 80 && Math.abs(y - lastScroll.y) < 80) return;
+      lastScroll = { x, y };
+      send({ action: 'scroll', x, y });
+    }, 400);
   }, true);
 
   // 'change' ne se déclenche qu'au blur — le tout dernier champ rempli avant

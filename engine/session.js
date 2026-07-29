@@ -157,7 +157,11 @@ async function replay(ws, page, ticket) {
         if (!outcome.ok) throw new Error(outcome.note);
         send(ws, { type: 'ai_done', note: outcome.note });
       } else {
-        await runStep(page, step);
+        // runStep renvoie une note quand il a dû s'écarter du chemin nominal
+        // (saisie frappe par frappe, liste masquée forcée…) : on la remonte
+        // plutôt que de laisser croire à une exécution parfaitement nominale.
+        const note = await runStep(page, step);
+        if (note) send(ws, { type: 'note', index: i + 1, note });
       }
     } catch (err) {
       // On arrête au premier échec : continuer sur une page qui n'est pas celle

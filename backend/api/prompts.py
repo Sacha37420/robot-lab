@@ -19,7 +19,18 @@ Un parcours est une liste plate d'étapes. Chaque étape est un objet avec un ch
 
 - `goto` — ouvrir une URL. Champs : `url` (obligatoire).
 - `click` — cliquer un élément. Champs : `selector` (obligatoire), `text` \
-(le libellé vu à l'écran, utile pour s'y retrouver).
+(le libellé vu à l'écran, utile pour s'y retrouver), `position`.
+  `position` est le point d'impact enregistré dans l'élément (`x`, `y`, plus `w`/`h`, \
+ses dimensions au moment du clic). Il compte pour les cibles où le centre ne suffit \
+pas : canevas, carte, curseur, grande zone dont seule une partie réagit. \
+**Recopie-le tel quel** sur les étapes qui en ont un et n'en invente jamais : tu ne \
+peux pas connaître les coordonnées d'une page. Une étape `click` sans `position` \
+clique simplement au centre de l'élément, ce qui convient à un bouton ordinaire.
+- `scroll` — faire défiler la page jusqu'à une position. Champs : `x`, `y` (en pixels). \
+Utile uniquement pour les pages qui chargent leur contenu au fur et à mesure \
+(liste infinie) : sans ce défilement, le contenu attendu plus bas n'existe jamais. \
+Inutile pour simplement atteindre un élément déjà présent — le robot fait défiler \
+tout seul dans ce cas.
 - `fill` — remplir un champ. Champs : `selector` (obligatoire), puis SOIT `value` \
 (valeur fixe), SOIT `variable` (nom d'une variable, pour boucler dessus). \
 `masked: true` signale un mot de passe dont la valeur n'a jamais été enregistrée.
@@ -94,6 +105,19 @@ RESPONSE_SCHEMA = {
                     'objective': {'type': 'string'},
                     'expected_result': {'type': 'string'},
                     'values': {'type': 'array', 'items': {'type': 'string'}},
+                    # Recopié à l'identique depuis l'étape existante — le modèle
+                    # ne doit jamais inventer de coordonnées (cf. prompt).
+                    'position': {
+                        'type': 'object',
+                        'properties': {
+                            'x': {'type': 'number'}, 'y': {'type': 'number'},
+                            'w': {'type': 'number'}, 'h': {'type': 'number'},
+                        },
+                        'required': ['x', 'y'],
+                        'additionalProperties': False,
+                    },
+                    'x': {'type': 'number'},
+                    'y': {'type': 'number'},
                 },
                 'required': ['action'],
                 'additionalProperties': False,

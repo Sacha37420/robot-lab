@@ -15,6 +15,16 @@ export interface AIProviderConfig {
   updated_at: string;
 }
 
+/** Point d'impact d'un clic DANS l'élément (w/h : ses dimensions à
+ *  l'enregistrement, pour replacer le point si la taille a changé). Ne sert
+ *  jamais à identifier l'élément — c'est le rôle du sélecteur. */
+export interface StepPosition {
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+}
+
 export interface RobotStep {
   action: string;
   selector?: string;
@@ -24,6 +34,10 @@ export interface RobotStep {
   text?: string;
   key?: string;
   masked?: boolean;
+  position?: StepPosition;
+  /** Position de défilement de la page (action `scroll`). */
+  x?: number;
+  y?: number;
   objective?: string;
   expected_result?: string;
   values?: string[];

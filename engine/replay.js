@@ -2,6 +2,15 @@
 // backend/api/steps.py — toute évolution se fait là-bas d'abord.
 
 const STEP_TIMEOUT_MS = 15000;
+// `reveal()` n'est qu'un coup de pouce optimiste : le vrai contrôle
+// d'actionnabilité est fait par l'action elle-même. Lui laisser le timeout
+// complet ferait perdre 15 s par élément non défilable AVANT même d'essayer
+// d'agir — mesuré : 30 s pour une seule étape sur un élément masqué.
+const REVEAL_TIMEOUT_MS = 2000;
+// Première tentative stricte avant de forcer une liste déroulante : assez pour
+// un élément lent à apparaître, assez court pour ne pas doubler l'attente quand
+// il est masqué en permanence (forcer donne de toute façon le bon résultat).
+const SELECT_STRICT_TIMEOUT_MS = 5000;
 // Garde-fou : une boucle sur une longue liste ne doit pas produire un plan
 // d'exécution illimité. Vécu ailleurs dans le lab (cf. MAX_PAGES de restauration).
 const MAX_EXPANDED_STEPS = 2000;
@@ -61,12 +70,85 @@ export function describe(step) {
       : `Remplir ${step.selector} avec « ${step.value} »`;
     case 'select':  return `Choisir « ${step.value} » dans ${step.selector}`;
     case 'press':   return `Appuyer sur ${step.key} dans ${step.selector}`;
+    case 'scroll':  return `Faire défiler jusqu'à ${Math.round(step.y || 0)} px`;
     case 'ai_task': return `Tâche IA : ${step.objective}`;
     default:        return step.action;
   }
 }
 
-/** Exécute une étape. Lève une erreur explicite, destinée à être affichée. */
+/** Amène l'élément dans la vue avant d'agir.
+ *
+ * Playwright fait déjà défiler tout seul dans ses contrôles d'actionnabilité ;
+ * l'appel explicite sert à deux choses : échouer avec un message clair quand
+ * l'élément reste inatteignable (plutôt qu'un timeout d'action opaque), et
+ * déclencher les pages qui n'affichent leur contenu qu'une fois défilé.
+ */
+async function reveal(locator) {
+  try {
+    await locator.scrollIntoViewIfNeeded({ timeout: REVEAL_TIMEOUT_MS });
+  } catch {
+    // Pas bloquant : l'action qui suit refera ses propres contrôles et
+    // produira, elle, un message d'erreur exploitable.
+  }
+}
+
+// Balises où le point d'impact porte le sens de l'action : cliquer au centre
+// d'une carte ou d'un canevas ne veut pas dire la même chose que cliquer au bord.
+const POSITIONAL_TAGS = new Set(['canvas', 'svg', 'img', 'map', 'area', 'video']);
+
+/** Décide s'il faut rejouer le point d'impact exact, et le replace dans
+ *  l'élément tel qu'il est maintenant.
+ *
+ * **C'est le sélecteur qui identifie l'élément, jamais la position** — elle n'est
+ * qu'un décalage à l'intérieur de la cible déjà trouvée. On ne l'applique donc que
+ * là où elle change le sens du clic :
+ *   - balise à surface signifiante (canevas, carte, image cliquable…) ;
+ *   - clic délibérément excentré sur un grand élément (curseur, barre de
+ *     progression, zone dont seule une partie réagit).
+ * Pour un bouton ou un lien ordinaire, le centre est plus robuste : une position
+ * héritée d'une mise en page légèrement différente pourrait tomber sur un enfant
+ * qui recouvre la cible.
+ *
+ * Si l'élément n'a plus la même taille, la position est reportée
+ * proportionnellement puis bornée à l'intérieur (Playwright refuse un point hors
+ * de l'élément).
+ */
+function scaledPosition(step, box, tagName) {
+  const p = step.position;
+  if (!p || !box || !box.width || !box.height) return undefined;
+
+  const positional = POSITIONAL_TAGS.has((tagName || '').toLowerCase());
+  if (!positional) {
+    // À quelle distance du centre le clic a-t-il été fait, en proportion ?
+    const offCentreX = p.w ? Math.abs(p.x - p.w / 2) / p.w : 0;
+    const offCentreY = p.h ? Math.abs(p.y - p.h / 2) / p.h : 0;
+    const deliberatelyOffCentre = offCentreX > 0.25 || offCentreY > 0.25;
+    const large = box.width > 150 || box.height > 150;
+    if (!(deliberatelyOffCentre && large)) return undefined;   // clic au centre
+  }
+
+  let { x, y } = p;
+  if (p.w && p.h && (Math.abs(p.w - box.width) > 1 || Math.abs(p.h - box.height) > 1)) {
+    x = (x / p.w) * box.width;
+    y = (y / p.h) * box.height;
+  }
+  return {
+    x: Math.min(Math.max(x, 1), box.width - 1),
+    y: Math.min(Math.max(y, 1), box.height - 1),
+  };
+}
+
+/** Valeur actuelle d'un champ, quel que soit son type. */
+async function readValue(locator) {
+  return locator.evaluate((el) => {
+    if (el.isContentEditable) return el.innerText;
+    return 'value' in el ? String(el.value) : '';
+  });
+}
+
+/** Exécute une étape. Lève une erreur explicite, destinée à être affichée.
+ *  Peut renvoyer une note (string) à afficher dans le journal quand le rejeu a
+ *  dû s'écarter du chemin nominal — ne jamais le faire en silence. */
 export async function runStep(page, step) {
   const options = { timeout: STEP_TIMEOUT_MS };
 
@@ -75,11 +157,29 @@ export async function runStep(page, step) {
       await page.goto(step.url, { waitUntil: 'domcontentloaded', ...options });
       return;
 
-    case 'click':
-      await page.click(step.selector, options);
+    case 'scroll':
+      await page.evaluate(
+        ({ x, y }) => window.scrollTo(x, y),
+        { x: step.x || 0, y: step.y || 0 },
+      );
+      // Laisse le temps au contenu déclenché par le défilement d'arriver.
+      await page.waitForTimeout(500);
       return;
 
-    case 'fill':
+    case 'click': {
+      // Le sélecteur, et lui seul, désigne quoi cliquer.
+      const locator = page.locator(step.selector).first();
+      await reveal(locator);
+      const [box, tagName] = await Promise.all([
+        locator.boundingBox().catch(() => null),
+        locator.evaluate((el) => el.tagName).catch(() => ''),
+      ]);
+      const position = scaledPosition(step, box, tagName);
+      await locator.click(position ? { ...options, position } : options);
+      return;
+    }
+
+    case 'fill': {
       if (step.masked) {
         // La valeur n'a volontairement jamais été enregistrée (garde-fou du Lot 2).
         throw new Error(
@@ -93,16 +193,52 @@ export async function runStep(page, step) {
           (step.variable ? ` (variable « ${step.variable} » sans valeur).` : '.'),
         );
       }
-      await page.fill(step.selector, step.value, options);
-      return;
 
-    case 'select':
-      await page.selectOption(step.selector, step.value, options);
-      return;
+      const locator = page.locator(step.selector).first();
+      await reveal(locator);
+      await locator.fill(step.value, options);
 
-    case 'press':
-      await page.press(step.selector, step.key, options);
+      // `fill` écrit la valeur et n'émet qu'un seul évènement `input`. Ça suffit
+      // à un champ ordinaire, mais pas à une autocomplétion ou à un masque de
+      // saisie qui écoutent chaque frappe : le champ peut rester vide, tronqué
+      // ou reformaté. On relit donc ce qui a réellement atterri.
+      if ((await readValue(locator)) === step.value) return;
+
+      await locator.click(options);
+      await locator.press('ControlOrMeta+a', options);
+      await locator.pressSequentially(step.value, { ...options, delay: 30 });
+
+      const got = await readValue(locator);
+      if (got === step.value) {
+        return `saisie frappe par frappe (le remplissage direct n'avait pas pris)`;
+      }
+      // Un champ masqué/normalisé peut légitimement différer (téléphone, date) :
+      // on le signale sans faire échouer le parcours.
+      return `valeur après saisie : « ${got} » (demandée : « ${step.value} »)`;
+    }
+
+    case 'select': {
+      const locator = page.locator(step.selector).first();
+      await reveal(locator);
+      try {
+        await locator.selectOption(step.value, { ...options, timeout: SELECT_STRICT_TIMEOUT_MS });
+      } catch (err) {
+        // Un <select> natif masqué derrière un widget maison n'est jamais
+        // « visible » au sens de Playwright. On réessaie en forçant plutôt que
+        // d'échouer — mais on le dit, pour ne pas masquer un vrai problème.
+        if (!/not visible|not enabled|not stable/i.test(String(err.message))) throw err;
+        await locator.selectOption(step.value, { ...options, force: true });
+        return 'liste masquée à l\'écran : choix appliqué directement';
+      }
       return;
+    }
+
+    case 'press': {
+      const locator = page.locator(step.selector).first();
+      await reveal(locator);
+      await locator.press(step.key, options);
+      return;
+    }
 
     case 'ai_task':
       // Piloté par l'IA (Lot 5). Traité en amont par session.js, qui dispose du

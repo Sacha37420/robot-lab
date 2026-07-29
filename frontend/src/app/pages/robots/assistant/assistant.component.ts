@@ -122,6 +122,7 @@ export class AssistantComponent implements OnInit {
         : `Remplir ${step.selector} avec ${step.variable ? `la variable « ${step.variable} »` : `« ${step.value} »`}`;
       case 'select':     return `Choisir ${step.variable ? `la variable « ${step.variable} »` : `« ${step.value} »`} dans ${step.selector}`;
       case 'press':      return `Appuyer sur ${step.key} dans ${step.selector}`;
+      case 'scroll':     return `Faire défiler jusqu'à ${step.y ?? 0} px`;
       case 'ai_task':    return `Tâche IA : ${step.objective}`;
       case 'loop_start': return `Début de boucle sur « ${step.variable} »`;
       case 'loop_end':   return 'Fin de boucle';
