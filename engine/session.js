@@ -1,8 +1,12 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { chromium } from 'playwright';
 import { captureInit } from './capture-script.js';
+import { describe, expand, runStep } from './replay.js';
 
 const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || 'http://robot-lab-backend:8000';
 const ENGINE_KEY = process.env.ENGINE_INTERNAL_KEY || '';
+const DOWNLOAD_ROOT = process.env.ROBOT_DOWNLOAD_ROOT || '/downloads';
 const VIEWPORT = { width: 1280, height: 800 };
 
 async function verifyTicket(token) {
@@ -32,28 +36,39 @@ function send(ws, payload) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
 }
 
-/** Lancement du navigateur + navigation initiale — borné dans le temps : un
- * ticket vérifié mais un backend/site de départ qui traîne ne doit jamais
- * laisser `busy` bloqué indéfiniment côté server.js. */
+/** Lancement du navigateur + vue live. Borné dans le temps : un ticket vérifié
+ * mais un backend/site de départ qui traîne ne doit jamais laisser `busy`
+ * bloqué indéfiniment côté server.js. */
 async function setup(ws, token, steps) {
-  const { start_url: startUrl } = await verifyTicket(token);
+  const ticket = await verifyTicket(token);
+  const isRun = ticket.mode === 'run';
 
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: VIEWPORT });
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    acceptDownloads: isRun,
+  });
   const page = await context.newPage();
 
-  await page.exposeFunction('__robotLabRecord__', (step) => {
-    steps.push(step);
-    send(ws, { type: 'step', step });
-  });
-  await page.addInitScript(captureInit);
+  if (isRun) {
+    await attachDownloads(context, page, ws, ticket.run_id);
+  } else {
+    // Capture des actions : uniquement en enregistrement. Pendant une exécution
+    // il n'y a pas d'utilisateur qui agit, et réenregistrer ce que le robot fait
+    // lui-même ne servirait qu'à polluer le parcours.
+    await page.exposeFunction('__robotLabRecord__', (step) => {
+      steps.push(step);
+      send(ws, { type: 'step', step });
+    });
+    await page.addInitScript(captureInit);
 
-  page.on('framenavigated', (frame) => {
-    if (frame !== page.mainFrame()) return;
-    const step = { action: 'goto', url: frame.url() };
-    steps.push(step);
-    send(ws, { type: 'step', step });
-  });
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame()) return;
+      const step = { action: 'goto', url: frame.url() };
+      steps.push(step);
+      send(ws, { type: 'step', step });
+    });
+  }
 
   const cdp = await context.newCDPSession(page);
   await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height });
@@ -62,10 +77,93 @@ async function setup(ws, token, steps) {
     cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
   });
 
-  await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
-  send(ws, { type: 'ready', startUrl });
+  await page.goto(ticket.start_url, { waitUntil: 'domcontentloaded' });
+  send(ws, { type: 'ready', startUrl: ticket.start_url, mode: ticket.mode });
 
-  return { browser, cdp, page };
+  return { browser, cdp, page, ticket };
+}
+
+/** Écrit les téléchargements du robot dans le dossier du run, et signale chaque
+ * fichier au client — qui va le récupérer via Django (qui le supprime ensuite).
+ *
+ * `download` est un évènement de **Page**, pas de BrowserContext (vérifié : un
+ * listener posé sur le contexte ne se déclenche jamais). On l'attache donc à
+ * chaque page — celle d'origine et toute page ouverte ensuite, un clic pouvant
+ * ouvrir un onglet qui déclenche le téléchargement. */
+async function attachDownloads(context, page, ws, runId) {
+  const directory = path.join(DOWNLOAD_ROOT, String(runId));
+  await fs.mkdir(directory, { recursive: true });
+
+  const onDownload = (download) => {
+    (async () => {
+      // Le nom vient du site distant : on ne garde que le nom de base, et le
+      // chemin final est recomposé — jamais de concaténation du nom brut.
+      const suggested = path.basename(download.suggestedFilename() || 'fichier');
+      const safe = suggested.replace(/[/\\]/g, '_') || 'fichier';
+      const target = path.join(directory, await uniqueName(directory, safe));
+
+      try {
+        await download.saveAs(target);
+        const { size } = await fs.stat(target);
+        send(ws, { type: 'download', name: path.basename(target), size });
+      } catch (err) {
+        send(ws, { type: 'error', message: `Téléchargement échoué : ${err.message || err}` });
+      }
+    })();
+  };
+
+  page.on('download', onDownload);
+  context.on('page', (opened) => opened.on('download', onDownload));
+}
+
+/** Évite qu'un second fichier du même nom écrase le premier. */
+async function uniqueName(directory, name) {
+  const ext = path.extname(name);
+  const base = path.basename(name, ext);
+  for (let i = 0; i < 100; i++) {
+    const candidate = i === 0 ? name : `${base} (${i})${ext}`;
+    try {
+      await fs.access(path.join(directory, candidate));
+    } catch {
+      return candidate;   // n'existe pas encore
+    }
+  }
+  return `${base}-${Date.now()}${ext}`;
+}
+
+/** Rejoue le parcours enregistré, en signalant chaque étape au client. */
+async function replay(ws, page, ticket) {
+  let plan;
+  try {
+    plan = expand(ticket.steps || [], ticket.variables || {});
+  } catch (err) {
+    send(ws, { type: 'error', message: String(err.message || err) });
+    return;
+  }
+
+  send(ws, { type: 'plan', total: plan.length });
+
+  for (let i = 0; i < plan.length; i++) {
+    const step = plan[i];
+    send(ws, { type: 'progress', index: i + 1, total: plan.length, label: describe(step) });
+    try {
+      await runStep(page, step);
+    } catch (err) {
+      // On arrête au premier échec : continuer sur une page qui n'est pas celle
+      // attendue enchaîne des erreurs sans rapport et masque la vraie cause.
+      send(ws, {
+        type: 'failed',
+        index: i + 1,
+        label: describe(step),
+        message: String(err.message || err),
+      });
+      return;
+    }
+  }
+
+  // Laisse le temps à un téléchargement déclenché par la dernière étape d'arriver.
+  await page.waitForTimeout(1500);
+  send(ws, { type: 'finished', total: plan.length });
 }
 
 /** Une session = un ticket = un navigateur. Ferme tout proprement dans tous les cas. */
@@ -78,7 +176,7 @@ export async function runSession(ws, token) {
     const setupResult = await withTimeout(setup(ws, token, steps), 20000, 'Initialisation de la session');
     browser = setupResult.browser;
     cdp = setupResult.cdp;
-    const page = setupResult.page;
+    const { page, ticket } = setupResult;
 
     ws.on('message', (raw) => {
       let msg;
@@ -88,10 +186,21 @@ export async function runSession(ws, token) {
       });
     });
 
-    await new Promise((resolve) => {
-      ws.once('close', resolve);
-      ws.once('robotlab:stop', resolve);
-    });
+    if (ticket.mode === 'run') {
+      // Course volontaire : le client peut fermer/arrêter en cours de rejeu.
+      await Promise.race([
+        replay(ws, page, ticket),
+        new Promise((resolve) => {
+          ws.once('close', resolve);
+          ws.once('robotlab:stop', resolve);
+        }),
+      ]);
+    } else {
+      await new Promise((resolve) => {
+        ws.once('close', resolve);
+        ws.once('robotlab:stop', resolve);
+      });
+    }
   } catch (err) {
     send(ws, { type: 'error', message: String(err.message || err) });
   } finally {

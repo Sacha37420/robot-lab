@@ -1,6 +1,7 @@
 import json
 
 from django.conf import settings
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -10,7 +11,8 @@ from rest_framework.views import APIView
 
 from . import prompts
 from .ai_client import AIError, AINotConfigured, complete_json
-from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot
+from .downloads import list_downloads, resolve_download
+from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun
 from .serializers import AIProviderConfigSerializer, RobotSerializer
 from .steps import StepError, validate_steps
 
@@ -76,6 +78,30 @@ class RecordingTicketView(APIView):
         return Response({'ticket': ticket.token}, status=201)
 
 
+class RunTicketView(APIView):
+    """
+    POST /api/robots/<id>/run-ticket/ — ouvre une exécution : crée le RobotRun
+    (qui porte l'autorisation des fichiers téléchargés) et le ticket WS associé.
+    """
+
+    def post(self, request, pk):
+        robot = get_object_or_404(Robot, pk=pk)
+        if robot.owner_email != request.user.email:
+            raise PermissionDenied("Ce robot ne vous appartient pas.")
+        if not robot.steps:
+            return Response(
+                {'detail': "Ce robot n'a pas encore de parcours enregistré."}, status=400,
+            )
+
+        EngineTicket.objects.filter(robot=robot, consumed_at__isnull=True).delete()
+
+        run = RobotRun.objects.create(robot=robot, owner_email=request.user.email)
+        ticket = EngineTicket.objects.create(
+            robot=robot, owner_email=request.user.email, mode='run', run=run,
+        )
+        return Response({'ticket': ticket.token, 'run_id': run.id}, status=201)
+
+
 class VerifyTicketView(APIView):
     """
     POST /api/internal/verify-ticket/ — appelé par `engine/`, jamais par un
@@ -107,7 +133,54 @@ class VerifyTicketView(APIView):
         return Response({
             'robot_id': ticket.robot_id,
             'start_url': ticket.robot.start_url,
+            'mode': ticket.mode,
+            'run_id': ticket.run_id,
+            # Le parcours n'est envoyé que pour une exécution : une session
+            # d'enregistrement n'a aucune raison de le connaître.
+            'steps': ticket.robot.steps if ticket.mode == 'run' else [],
+            'variables': ticket.robot.variables if ticket.mode == 'run' else {},
         })
+
+
+class RunDownloadListView(APIView):
+    """GET /api/runs/<run_id>/downloads/ — fichiers encore disponibles pour ce run."""
+
+    def get(self, request, run_id):
+        run = get_object_or_404(RobotRun, pk=run_id)
+        if run.owner_email != request.user.email:
+            raise PermissionDenied("Cette exécution ne vous appartient pas.")
+        return Response(list_downloads(run.id))
+
+
+class RunDownloadView(APIView):
+    """
+    GET /api/runs/<run_id>/downloads/<name>/ — sert un fichier téléchargé par le
+    robot **puis le supprime du serveur**. C'est le comportement attendu : le
+    serveur n'est qu'un relais, le fichier finit chez l'utilisateur et nulle part
+    ailleurs.
+
+    Le nom vient d'un site tiers via le robot : la résolution passe par
+    `downloads.resolve_download()`, qui refuse tout chemin sortant du run.
+    """
+
+    def get(self, request, run_id, name):
+        run = get_object_or_404(RobotRun, pk=run_id)
+        if run.owner_email != request.user.email:
+            raise PermissionDenied("Cette exécution ne vous appartient pas.")
+
+        path = resolve_download(run.id, name)
+        if path is None:
+            raise NotFound('Fichier introuvable (ou déjà récupéré).')
+
+        payload = path.read_bytes()
+        # Suppression seulement après lecture réussie : un échec de lecture ne
+        # doit pas faire disparaître le fichier sans que personne ne l'ait eu.
+        path.unlink(missing_ok=True)
+
+        response = HttpResponse(payload, content_type='application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{path.name}"'
+        response['Content-Length'] = str(len(payload))
+        return response
 
 
 class AssistantView(APIView):

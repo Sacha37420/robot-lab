@@ -1,0 +1,78 @@
+<main class="page-run">
+  <div class="page-head">
+    <h2>Exécution du robot</h2>
+    <div class="head-actions">
+      @if (status() === 'running') {
+        <button type="button" class="btn-secondary" (click)="stop()">Arrêter</button>
+      }
+      <a routerLink="/robots" class="btn-secondary">← Retour</a>
+    </div>
+  </div>
+
+  @if (status() === 'connecting') {
+    <p class="status">Démarrage du robot…</p>
+  }
+  @if (status() === 'failed' && message()) {
+    <p class="error">{{ message() }}</p>
+  }
+  @if (status() === 'finished') {
+    <p class="saved">Exécution terminée.</p>
+  }
+
+  @if (status() !== 'connecting') {
+    <div class="run-layout">
+      <div class="viewport">
+        @if (frameSrc()) {
+          <img [src]="frameSrc()" alt="Vue en direct du robot" />
+        } @else {
+          <p class="status">Chargement de la page…</p>
+        }
+      </div>
+
+      <aside class="side">
+        @if (progress(); as p) {
+          <section class="panel">
+            <h3>Progression</h3>
+            <p class="progress-count">{{ p.index }} / {{ p.total }} étape(s)</p>
+            <div class="bar"><span [style.width.%]="p.total ? (p.index / p.total) * 100 : 0"></span></div>
+          </section>
+        }
+
+        <section class="panel">
+          <h3>Fichiers téléchargés ({{ files().length }})</h3>
+          <p class="hint">
+            Les fichiers sont enregistrés sur votre machine puis supprimés du serveur.
+          </p>
+          <ul class="files">
+            @for (file of files(); track file.name) {
+              <li>
+                <span class="file-name">{{ file.name }}</span>
+                <span class="file-size">{{ formatSize(file.size) }}</span>
+                @switch (file.state) {
+                  @case ('fetching') { <span class="tag">récupération…</span> }
+                  @case ('saved')    { <span class="tag tag-ok">enregistré</span> }
+                  @case ('error')    { <span class="tag tag-err">échec</span> }
+                }
+              </li>
+            }
+            @if (files().length === 0) {
+              <li class="empty">Aucun fichier pour l'instant.</li>
+            }
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h3>Journal</h3>
+          <ol class="log">
+            @for (line of log(); track $index) {
+              <li [class]="'line-' + line.state">{{ line.label }}</li>
+            }
+            @if (log().length === 0) {
+              <li class="empty">En attente…</li>
+            }
+          </ol>
+        </section>
+      </aside>
+    </div>
+  }
+</main>

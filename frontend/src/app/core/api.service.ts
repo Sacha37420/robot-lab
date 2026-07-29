@@ -96,6 +96,20 @@ export class ApiService {
     return this.http.post<{ ticket: string }>(`${this.base}/api/robots/${id}/recording-ticket/`, {});
   }
 
+  getRunTicket(id: number): Observable<{ ticket: string; run_id: number }> {
+    return this.http.post<{ ticket: string; run_id: number }>(
+      `${this.base}/api/robots/${id}/run-ticket/`, {},
+    );
+  }
+
+  /** Récupère un fichier téléchargé par le robot. Le serveur le supprime ensuite. */
+  fetchDownload(runId: number, name: string): Observable<Blob> {
+    return this.http.get(
+      `${this.base}/api/runs/${runId}/downloads/${encodeURIComponent(name)}/`,
+      { responseType: 'blob' },
+    );
+  }
+
   updateRobotSteps(id: number, steps: RobotStep[], variables?: RobotVariables): Observable<Robot> {
     const payload: { steps: RobotStep[]; variables?: RobotVariables } = { steps };
     if (variables) payload.variables = variables;

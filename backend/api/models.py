@@ -67,6 +67,28 @@ def _generate_token() -> str:
     return secrets.token_hex(32)
 
 
+class RobotRun(models.Model):
+    """Une exécution du robot — porte l'autorisation des fichiers téléchargés.
+
+    `engine/` écrit les téléchargements dans un dossier nommé d'après l'id de ce
+    run ; Django, qui seul connaît le lien run → robot → propriétaire, sert puis
+    supprime ces fichiers. C'est ce qui permet à `engine/` de rester **sans aucun
+    droit d'écriture en base** (propriété posée au Lot 2) tout en produisant des
+    fichiers dont l'accès reste correctement cloisonné.
+    """
+
+    robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name='runs')
+    owner_email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'robot_runs'
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:
+        return f'{self.robot_id} — {self.created_at:%Y-%m-%d %H:%M}'
+
+
 class EngineTicket(models.Model):
     """Ticket à usage unique autorisant une connexion WebSocket sur `engine/`.
 
@@ -79,9 +101,15 @@ class EngineTicket(models.Model):
     limite au temps d'ouvrir la connexion WS juste après l'avoir reçu.
     """
 
+    MODE_CHOICES = [('record', 'Enregistrement'), ('run', 'Exécution')]
+
     token = models.CharField(max_length=64, unique=True, default=_generate_token)
     robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name='tickets')
     owner_email = models.EmailField()
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default='record')
+    run = models.ForeignKey(
+        RobotRun, on_delete=models.CASCADE, related_name='tickets', null=True, blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
 

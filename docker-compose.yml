@@ -8,6 +8,14 @@ networks:
     external: true
     name: dev-net
 
+volumes:
+  # Fichiers téléchargés par les robots : `engine` y écrit, `backend` les sert
+  # puis les supprime. Volume NON externe à dessein — son contenu est transitoire
+  # et `clean2.sh` peut le vider sans rien perdre d'important (à l'inverse des
+  # volumes média d'app, cf. CLAUDE.md). Le stockage utilisateur persistant reste
+  # du ressort de l'app `storage`, pas d'ici.
+  downloads:
+
 services:
 
   backend:
@@ -17,6 +25,8 @@ services:
     env_file: .env
     ports:
       - "8094:8000"
+    volumes:
+      - downloads:/downloads
     networks:
       - sso-net
       - dev-net
@@ -49,6 +59,8 @@ services:
     env_file: .env
     ports:
       - "8095:4300"
+    volumes:
+      - downloads:/downloads
     networks:
       - sso-net
       - dev-net

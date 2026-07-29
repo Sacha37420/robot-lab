@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY server.js session.js capture-script.js ./
+COPY server.js session.js capture-script.js replay.js ./
 
 EXPOSE 4300
 CMD ["node", "server.js"]

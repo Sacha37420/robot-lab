@@ -60,6 +60,9 @@
             <span class="badge badge-off">Parcours non enregistré</span>
           }
           <div class="robot-actions">
+            @if (robot.steps.length > 0) {
+              <a [routerLink]="['/robots', robot.id, 'lancer']" class="btn-primary">Lancer</a>
+            }
             <a [routerLink]="['/robots', robot.id, 'enregistrer']" class="btn-secondary">
               {{ robot.steps.length > 0 ? 'Réenregistrer' : 'Enregistrer le parcours' }}
             </a>
