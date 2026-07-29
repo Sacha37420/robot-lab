@@ -11,6 +11,39 @@
     <p class="error">{{ errorMessage() || 'Une erreur est survenue.' }}</p>
   }
 
+  @if (dialog(); as d) {
+    <section class="dialog-panel" role="dialog" aria-modal="true" aria-label="Question du site">
+      <h3>Le site pose une question</h3>
+      <p class="dialog-message">{{ d.message }}</p>
+
+      @if (d.kind === 'prompt') {
+        <label class="field">
+          <span>Réponse à saisir</span>
+          <input type="text" [(ngModel)]="d.value" />
+        </label>
+      }
+
+      <p class="hint">
+        Cette fenêtre vient du navigateur, pas de la page — elle n'apparaît donc pas
+        dans la vue ci-dessous, et la page reste bloquée jusqu'à votre réponse.
+        Votre choix sera rejoué à l'identique au lancement du robot.
+      </p>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn-secondary" (click)="answerDialog(false)">Refuser</button>
+        <button type="button" class="btn-primary" (click)="answerDialog(true)">Accepter</button>
+      </div>
+    </section>
+  }
+
+  @if (notes().length > 0) {
+    <ul class="notes">
+      @for (note of notes(); track $index) {
+        <li>{{ note }}</li>
+      }
+    </ul>
+  }
+
   @if (status() === 'live' || status() === 'stopping') {
     <div class="record-layout">
       <div

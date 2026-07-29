@@ -38,6 +38,10 @@ export interface RobotStep {
   /** Position de défilement de la page (action `scroll`). */
   x?: number;
   y?: number;
+  /** Réponse à une boîte de dialogue du navigateur (action `dialog`). */
+  kind?: string;
+  message?: string;
+  accept?: boolean;
   objective?: string;
   expected_result?: string;
   values?: string[];

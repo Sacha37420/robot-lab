@@ -22,6 +22,11 @@ STEP_SCHEMA = {
     # Position de défilement de la page — nécessaire aux pages qui chargent leur
     # contenu au fur et à mesure (liste infinie).
     'scroll':     {'x', 'y'},
+    # Réponse à une boîte de dialogue du navigateur (alert/confirm/prompt).
+    # Ce n'est pas une action que le robot déclenche : c'est la réponse à donner
+    # quand la boîte apparaît, en conséquence d'une autre étape. Elle est
+    # enregistrée telle que l'utilisateur y a répondu.
+    'dialog':     {'kind', 'message', 'accept', 'value'},
     # Lot 5 — l'IA pilote elle-même cette portion de navigation.
     'ai_task':    {'objective', 'expected_result'},
     'loop_start': {'variable', 'values'},
@@ -35,6 +40,7 @@ REQUIRED_FIELDS = {
     'select':     {'selector'},
     'press':      {'selector', 'key'},
     'scroll':     set(),
+    'dialog':     {'accept'},
     'ai_task':    {'objective'},
     'loop_start': {'variable'},
     'loop_end':   set(),
@@ -104,6 +110,14 @@ def validate_steps(steps):
             for key in ('x', 'y'):
                 if key in step and not isinstance(step[key], (int, float)):
                     raise StepError(f'Étape {index} (scroll) : {key} doit être un nombre.')
+
+        # `accept` décide d'un clic sur « OK » ou « Annuler » dans une boîte du
+        # navigateur : une valeur ambiguë (chaîne « false », 0…) ne doit pas être
+        # interprétée au hasard, une confirmation peut porter sur une suppression.
+        if action == 'dialog' and not isinstance(step.get('accept'), bool):
+            raise StepError(
+                f'Étape {index} (dialog) : accept doit valoir true ou false.'
+            )
 
         if action == 'loop_start':
             depth += 1

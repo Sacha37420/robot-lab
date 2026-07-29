@@ -71,6 +71,7 @@ export function describe(step) {
     case 'select':  return `Choisir « ${step.value} » dans ${step.selector}`;
     case 'press':   return `Appuyer sur ${step.key} dans ${step.selector}`;
     case 'scroll':  return `Faire défiler jusqu'à ${Math.round(step.y || 0)} px`;
+    case 'dialog':  return `Boîte « ${step.message || '' } » : ${step.accept ? 'Accepter' : 'Refuser'}`;
     case 'ai_task': return `Tâche IA : ${step.objective}`;
     default:        return step.action;
   }
@@ -164,6 +165,13 @@ export async function runStep(page, step) {
       );
       // Laisse le temps au contenu déclenché par le défilement d'arriver.
       await page.waitForTimeout(500);
+      return;
+
+    case 'dialog':
+      // Rien à exécuter : une boîte de dialogue n'est pas déclenchée par le robot
+      // mais par le site, en conséquence d'une autre étape. La réponse est
+      // appliquée par le handler de session.js au moment où la boîte apparaît.
+      // L'étape reste dans le parcours pour rester visible et modifiable.
       return;
 
     case 'click': {

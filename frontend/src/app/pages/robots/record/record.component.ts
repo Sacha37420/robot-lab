@@ -1,4 +1,5 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService, RobotStep } from '../../../core/api.service';
 
@@ -7,12 +8,23 @@ type EngineMessage =
   | { type: 'frame'; data: string }
   | { type: 'step'; step: RobotStep }
   | { type: 'final'; steps: RobotStep[] }
+  | { type: 'dialog'; kind: string; message: string; defaultValue: string }
+  | { type: 'note'; note: string }
   | { type: 'error'; message: string };
+
+/** Boîte de dialogue du navigateur en attente d'une réponse de l'utilisateur.
+ *  Elle n'apparaît pas dans la vue live (elle est au niveau du navigateur, pas
+ *  de la page), d'où ce panneau dédié. */
+interface PendingDialog {
+  kind: string;
+  message: string;
+  value: string;
+}
 
 @Component({
   selector: 'app-record',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, FormsModule],
   templateUrl: './record.component.html',
   styleUrl: './record.component.scss',
 })
@@ -30,6 +42,8 @@ export class RecordComponent implements OnInit, OnDestroy {
   errorMessage = signal<string | null>(null);
   frameSrc = signal<string | null>(null);
   steps = signal<RobotStep[]>([]);
+  dialog = signal<PendingDialog | null>(null);
+  notes = signal<string[]>([]);
 
   ngOnInit(): void {
     this.api.getRecordingTicket(this.robotId).subscribe({
@@ -80,11 +94,34 @@ export class RecordComponent implements OnInit, OnDestroy {
           },
         });
         break;
+      // Le site pose une question au navigateur : la page reste bloquée jusqu'à
+      // la réponse, donc on la demande tout de suite à l'utilisateur.
+      case 'dialog':
+        this.dialog.set({ kind: msg.kind, message: msg.message, value: msg.defaultValue || '' });
+        break;
+
+      case 'note':
+        this.notes.update(n => [...n, msg.note]);
+        break;
+
       case 'error':
         this.status.set('error');
         this.errorMessage.set(msg.message);
         break;
     }
+  }
+
+  /** Répond à la boîte de dialogue. La réponse est enregistrée comme étape et
+   *  sera rejouée telle quelle au lancement du robot. */
+  answerDialog(accept: boolean): void {
+    const pending = this.dialog();
+    if (!pending) return;
+    this.ws?.send(JSON.stringify({
+      type: 'dialog_answer',
+      accept,
+      value: pending.kind === 'prompt' ? pending.value : '',
+    }));
+    this.dialog.set(null);
   }
 
   stop(): void {

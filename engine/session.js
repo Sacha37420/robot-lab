@@ -15,6 +15,9 @@ const VIEWPORT = { width: 1280, height: 800 };
 const DOWNLOAD_GRACE_MS = Number(process.env.ROBOT_DOWNLOAD_GRACE_MS || 15000);
 // Plafond global de l'écriture, pour ne pas retenir le mutex de engine/ à vie.
 const DOWNLOAD_CAP_MS = Number(process.env.ROBOT_DOWNLOAD_CAP_MS || 180000);
+// Temps laissé à l'utilisateur pour répondre à une boîte de dialogue pendant
+// l'enregistrement. La page est bloquée tant qu'elle n'est pas fermée.
+const DIALOG_TIMEOUT_MS = Number(process.env.ROBOT_DIALOG_TIMEOUT_MS || 120000);
 
 async function verifyTicket(token) {
   // Un backend lent/injoignable ne doit jamais bloquer `busy` indéfiniment —
@@ -57,6 +60,14 @@ async function setup(ws, token, steps) {
     acceptDownloads: isRun,
   });
   const page = await context.newPage();
+
+  // Les boîtes de dialogue concernent les DEUX modes : à l'enregistrement pour
+  // que l'utilisateur réponde, au rejeu pour rejouer sa réponse.
+  attachDialogs(context, page, ws, {
+    isRun,
+    steps,
+    answers: isRun ? dialogAnswers(ticket.steps) : null,
+  });
 
   if (isRun) {
     pendingDownloads = await attachDownloads(context, page, ws, ticket.run_id);
@@ -134,6 +145,115 @@ async function attachDownloads(context, page, ws, runId) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Boîtes de dialogue du navigateur (alert / confirm / prompt / beforeunload).
+ *
+ * Par défaut Playwright les **rejette toutes en silence** : un site qui demande
+ * confirmation avant de générer un export ne partait jamais, et la boîte n'était
+ * même pas visible dans la vue live (elle est au niveau du navigateur, pas de la
+ * page — le screencast ne la montre pas). Même famille de bug que l'ancien
+ * filtre de clics : un abandon invisible.
+ *
+ * À l'enregistrement, **c'est l'utilisateur qui répond** : la question lui est
+ * remontée et sa réponse est enregistrée comme étape. Au rejeu, on rejoue cette
+ * réponse. Rien n'est accepté d'office — une confirmation peut porter sur une
+ * suppression.
+ */
+function attachDialogs(context, page, ws, { isRun, steps, answers }) {
+  const handler = async (dialog) => {
+    const kind = dialog.type();
+    const message = dialog.message();
+
+    // « Quitter le site ? » : bloquer ici empêcherait toute navigation, et il n'y
+    // a pas de décision métier derrière. On laisse passer en le signalant.
+    if (kind === 'beforeunload') {
+      await dialog.accept().catch(() => {});
+      send(ws, { type: 'note', note: 'confirmation de quitter la page : acceptée' });
+      return;
+    }
+
+    if (isRun) {
+      const recorded = answers.take(message);
+      if (!recorded) {
+        // Boîte non enregistrée : refuser est le choix sûr (ne rien valider
+        // qu'on n'a pas vu), mais il faut le dire — c'est souvent le signe d'un
+        // parcours enregistré avant que le site n'ajoute cette confirmation.
+        await dialog.dismiss().catch(() => {});
+        send(ws, {
+          type: 'note',
+          note: `boîte de dialogue imprévue (« ${message} ») : refusée par précaution`,
+        });
+        return;
+      }
+      if (recorded.accept) await dialog.accept(recorded.value || '').catch(() => {});
+      else await dialog.dismiss().catch(() => {});
+      send(ws, {
+        type: 'note',
+        note: `boîte « ${message} » : ${recorded.accept ? 'acceptée' : 'refusée'} (comme à l'enregistrement)`,
+      });
+      return;
+    }
+
+    // ── Enregistrement : on demande à l'utilisateur ──────────────────────────
+    send(ws, { type: 'dialog', kind, message, defaultValue: dialog.defaultValue() || '' });
+    const answer = await waitForDialogAnswer(ws, DIALOG_TIMEOUT_MS);
+
+    if (answer === null) {
+      // Sans réponse, la page reste bloquée et la session retiendrait le mutex
+      // de engine/ : on refuse et on l'annonce clairement.
+      await dialog.dismiss().catch(() => {});
+      send(ws, {
+        type: 'error',
+        message: `Aucune réponse à la boîte de dialogue après `
+               + `${Math.round(DIALOG_TIMEOUT_MS / 1000)} s — refusée automatiquement.`,
+      });
+      return;
+    }
+
+    if (answer.accept) await dialog.accept(answer.value || '').catch(() => {});
+    else await dialog.dismiss().catch(() => {});
+
+    const step = { action: 'dialog', kind, message, accept: !!answer.accept };
+    if (kind === 'prompt' && answer.accept) step.value = answer.value || '';
+    steps.push(step);
+    send(ws, { type: 'step', step });
+  };
+
+  page.on('dialog', handler);
+  context.on('page', (opened) => opened.on('dialog', handler));
+}
+
+/** Attend la réponse du client. `null` si personne ne répond à temps. */
+function waitForDialogAnswer(ws, timeoutMs) {
+  return new Promise((resolve) => {
+    const onAnswer = (payload) => {
+      clearTimeout(timer);
+      resolve(payload);
+    };
+    const timer = setTimeout(() => {
+      ws.removeListener('robotlab:dialog', onAnswer);
+      resolve(null);
+    }, timeoutMs);
+    ws.once('robotlab:dialog', onAnswer);
+  });
+}
+
+/** File des réponses enregistrées, consommée quand les boîtes réapparaissent.
+ *
+ * On préfère la réponse dont le message correspond exactement — l'ordre des
+ * boîtes peut changer d'une exécution à l'autre. À défaut, on prend la plus
+ * ancienne non consommée.
+ */
+function dialogAnswers(steps) {
+  const queue = (steps || []).filter((s) => s.action === 'dialog');
+  return {
+    take(message) {
+      const exact = queue.findIndex((s) => s.message === message);
+      if (exact >= 0) return queue.splice(exact, 1)[0];
+      return queue.shift() || null;
+    },
+  };
+}
 
 /** Laisse les téléchargements démarrer puis s'écrire avant de fermer la session.
  *
@@ -310,6 +430,10 @@ async function handleClientMessage(page, ws, msg, steps) {
       return;
     case 'type':
       await page.keyboard.insertText(msg.text || '');
+      return;
+    case 'dialog_answer':
+      // Réveille le handler de attachDialogs, qui attend cette réponse.
+      ws.emit('robotlab:dialog', { accept: !!msg.accept, value: msg.value || '' });
       return;
     case 'stop':
       send(ws, { type: 'final', steps });

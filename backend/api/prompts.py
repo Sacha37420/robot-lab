@@ -26,6 +26,13 @@ pas : canevas, carte, curseur, grande zone dont seule une partie réagit. \
 **Recopie-le tel quel** sur les étapes qui en ont un et n'en invente jamais : tu ne \
 peux pas connaître les coordonnées d'une page. Une étape `click` sans `position` \
 clique simplement au centre de l'élément, ce qui convient à un bouton ordinaire.
+- `dialog` — réponse à une boîte de dialogue du navigateur (« Confirmez-vous ? »). \
+Champs : `accept` (obligatoire, `true` = OK / `false` = Annuler), `message` (le texte \
+de la boîte, qui sert à la reconnaître), `kind`, `value` (la saisie, pour une boîte \
+de type `prompt`). Ce n'est **pas** une action que le robot déclenche : c'est la \
+réponse à donner quand la boîte apparaît, en conséquence d'une autre étape. Elle a \
+été enregistrée telle que la personne y a répondu — ne change `accept` que si elle le \
+demande explicitement : accepter une confirmation peut valider une suppression.
 - `scroll` — faire défiler la page jusqu'à une position. Champs : `x`, `y` (en pixels). \
 Utile uniquement pour les pages qui chargent leur contenu au fur et à mesure \
 (liste infinie) : sans ce défilement, le contenu attendu plus bas n'existe jamais. \
@@ -118,6 +125,9 @@ RESPONSE_SCHEMA = {
                     },
                     'x': {'type': 'number'},
                     'y': {'type': 'number'},
+                    'kind': {'type': 'string'},
+                    'message': {'type': 'string'},
+                    'accept': {'type': 'boolean'},
                 },
                 'required': ['action'],
                 'additionalProperties': False,
