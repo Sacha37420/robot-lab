@@ -1,6 +1,11 @@
+import secrets
+
 from django.db import models
+from django.utils import timezone
 
 from .fields import EncryptedTextField
+
+TICKET_TTL_SECONDS = 30
 
 PROVIDER_CHOICES = [
     ('claude', 'Claude'),
@@ -34,8 +39,9 @@ class AIProviderConfig(models.Model):
 class Robot(models.Model):
     """Un robot de navigation : identité + parcours enregistré.
 
-    `steps` est rempli à partir du Lot 2 (moteur d'enregistrement) — en Lot 1 il
-    reste une liste vide, la création se limite au nom/description/URL de départ.
+    `steps` est une liste d'étapes structurées (`{action, selector, value, ...}`),
+    capturée par le service `engine/` puis persistée par le frontend via un PATCH
+    authentifié classique — `engine/` lui-même n'a aucun droit d'écriture en base.
     """
 
     owner_email = models.EmailField()
@@ -52,3 +58,39 @@ class Robot(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+def _generate_token() -> str:
+    return secrets.token_hex(32)
+
+
+class EngineTicket(models.Model):
+    """Ticket à usage unique autorisant une connexion WebSocket sur `engine/`.
+
+    Un navigateur ne peut pas poser de header Authorization custom sur un handshake
+    WS : Django reste donc le seul point qui valide le JWT Keycloak (via l'endpoint
+    qui crée ce ticket), et `engine/` vérifie ce ticket par un callback interne
+    (header `X-Engine-Key`, même famille que X-Setup-Key/SETUP_CATALOG_KEY de
+    lab-admin) plutôt que de revalider un JWT lui-même. Consommé à la première
+    vérification, expire vite (TICKET_TTL_SECONDS) : la fenêtre d'usage utile se
+    limite au temps d'ouvrir la connexion WS juste après l'avoir reçu.
+    """
+
+    token = models.CharField(max_length=64, unique=True, default=_generate_token)
+    robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name='tickets')
+    owner_email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'engine_tickets'
+
+    def is_valid(self) -> bool:
+        if self.consumed_at is not None:
+            return False
+        age = (timezone.now() - self.created_at).total_seconds()
+        return age <= TICKET_TTL_SECONDS
+
+    def consume(self) -> None:
+        self.consumed_at = timezone.now()
+        self.save(update_fields=['consumed_at'])

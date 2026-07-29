@@ -25,4 +25,13 @@ class RobotSerializer(serializers.ModelSerializer):
             'id', 'name', 'description', 'start_url', 'steps',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'steps', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_steps(self, value):
+        if not isinstance(value, list) or not all(
+            isinstance(step, dict) and step.get('action') for step in value
+        ):
+            raise serializers.ValidationError(
+                "Doit être une liste d'étapes, chacune avec une clé 'action'."
+            )
+        return value

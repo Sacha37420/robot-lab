@@ -1,0 +1,68 @@
+<main class="page-record">
+  <div class="page-head">
+    <h2>Enregistrement du parcours</h2>
+    <a routerLink="/robots" class="btn-secondary">← Retour</a>
+  </div>
+
+  @if (status() === 'connecting') {
+    <p class="status">Connexion au moteur…</p>
+  }
+  @if (status() === 'error') {
+    <p class="error">{{ errorMessage() || 'Une erreur est survenue.' }}</p>
+  }
+
+  @if (status() === 'live' || status() === 'stopping') {
+    <div class="record-layout">
+      <div
+        class="viewport"
+        tabindex="0"
+        (keydown)="onKeyDown($event)"
+        (keyup)="onKeyUp($event)"
+      >
+        @if (frameSrc()) {
+          <img
+            #liveImg
+            [src]="frameSrc()"
+            alt="Vue live du navigateur"
+            (mousedown)="onMouseEvent($event, 'down')"
+            (mouseup)="onMouseEvent($event, 'up')"
+            (mousemove)="onMouseEvent($event, 'move')"
+            (wheel)="onWheel($event)"
+          />
+        } @else {
+          <p class="status">Chargement de la page…</p>
+        }
+      </div>
+
+      <aside class="steps-panel">
+        <h3>Étapes capturées ({{ steps().length }})</h3>
+        <ol class="steps-list">
+          @for (step of steps(); track $index) {
+            <li>
+              <strong>{{ step.action }}</strong>
+              @if (step.masked) {
+                <span class="masked">🔒 valeur non enregistrée</span>
+              } @else if (step.value !== undefined) {
+                <span>{{ step.value }}</span>
+              } @else if (step.url) {
+                <span>{{ step.url }}</span>
+              } @else if (step.text) {
+                <span>{{ step.text }}</span>
+              }
+              @if (step.selector) {
+                <code>{{ step.selector }}</code>
+              }
+            </li>
+          }
+          @if (steps().length === 0) {
+            <li class="empty">Interagissez avec la page pour commencer.</li>
+          }
+        </ol>
+
+        <button type="button" class="btn-primary" [disabled]="status() === 'stopping'" (click)="stop()">
+          {{ status() === 'stopping' ? 'Enregistrement…' : "Enregistrer l'initialisation du robot" }}
+        </button>
+      </aside>
+    </div>
+  }
+</main>

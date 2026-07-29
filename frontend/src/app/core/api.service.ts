@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 interface EnvWindow {
-  __env?: { apiUrl?: string };
+  __env?: { apiUrl?: string; engineUrl?: string };
 }
 
 export type AIProvider = 'claude' | 'mistral';
@@ -15,12 +15,22 @@ export interface AIProviderConfig {
   updated_at: string;
 }
 
+export interface RobotStep {
+  action: string;
+  selector?: string;
+  value?: string;
+  url?: string;
+  text?: string;
+  key?: string;
+  masked?: boolean;
+}
+
 export interface Robot {
   id: number;
   name: string;
   description: string;
   start_url: string;
-  steps: unknown[];
+  steps: RobotStep[];
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +44,11 @@ export class ApiService {
   private get base(): string {
     return (window as unknown as EnvWindow).__env?.apiUrl
       ?? 'http://localhost:8094';
+  }
+
+  get engineUrl(): string {
+    return (window as unknown as EnvWindow).__env?.engineUrl
+      ?? 'ws://localhost:8095';
   }
 
   getAiConfig(provider: AIProvider): Observable<AIProviderConfig> {
@@ -58,5 +73,13 @@ export class ApiService {
 
   deleteRobot(id: number): Observable<void> {
     return this.http.delete<void>(`${this.base}/api/robots/${id}/`);
+  }
+
+  getRecordingTicket(id: number): Observable<{ ticket: string }> {
+    return this.http.post<{ ticket: string }>(`${this.base}/api/robots/${id}/recording-ticket/`, {});
+  }
+
+  updateRobotSteps(id: number, steps: RobotStep[]): Observable<Robot> {
+    return this.http.patch<Robot>(`${this.base}/api/robots/${id}/`, { steps });
   }
 }

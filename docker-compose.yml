@@ -38,3 +38,21 @@ services:
       caddy: "${DOMAIN}"
       caddy.handle_path: "/robot-lab/*"
       caddy.handle_path.reverse_proxy: "{{upstreams 80}}"
+
+  # Moteur d'enregistrement/exécution Playwright (vue live WebSocket + CDP) —
+  # Chromium isolé ici, jamais dans l'image backend (cf. CLAUDE.md, runner/).
+  # Un seul navigateur à la fois (mutex interne, engine/server.js).
+  engine:
+    build: ./engine
+    container_name: robot-lab-engine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8095:4300"
+    networks:
+      - sso-net
+      - dev-net
+    labels:
+      caddy: "${DOMAIN}"
+      caddy.handle_path: "/robot-lab-engine/*"
+      caddy.handle_path.reverse_proxy: "{{upstreams 4300}}"

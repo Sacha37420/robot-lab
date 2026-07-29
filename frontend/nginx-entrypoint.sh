@@ -12,7 +12,8 @@ window.__env = {
   keycloakRealm:    "${KEYCLOAK_REALM:-ssolab}",
   keycloakClientId: "${KEYCLOAK_CLIENT_ID}",
   apiUrl:           "https://${DOMAIN}/robot-lab-api",
-  appUrl:           "https://${DOMAIN}/robot-lab/"
+  appUrl:           "https://${DOMAIN}/robot-lab/",
+  engineUrl:        "wss://${DOMAIN}/robot-lab-engine"
 };
 JSEOF
 else
@@ -22,7 +23,8 @@ window.__env = {
   keycloakRealm:    "${KEYCLOAK_REALM:-ssolab}",
   keycloakClientId: "${KEYCLOAK_CLIENT_ID}",
   apiUrl:           window.location.protocol + '//' + window.location.hostname + ':${PORT_BACKEND:-8000}',
-  appUrl:           window.location.protocol + '//' + window.location.hostname + ':${PORT_FRONTEND:-4200}'
+  appUrl:           window.location.protocol + '//' + window.location.hostname + ':${PORT_FRONTEND:-4200}',
+  engineUrl:        (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.hostname + ':${PORT_ENGINE:-4300}'
 };
 JSEOF
 fi

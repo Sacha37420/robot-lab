@@ -54,7 +54,15 @@
             <p class="description">{{ robot.description }}</p>
           }
           <a [href]="robot.start_url" target="_blank" rel="noopener" class="start-url">{{ robot.start_url }}</a>
+          @if (robot.steps.length > 0) {
+            <span class="badge badge-ok">{{ robot.steps.length }} étape(s) enregistrée(s)</span>
+          } @else {
+            <span class="badge badge-off">Parcours non enregistré</span>
+          }
           <div class="robot-actions">
+            <a [routerLink]="['/robots', robot.id, 'enregistrer']" class="btn-secondary">
+              {{ robot.steps.length > 0 ? 'Réenregistrer' : 'Enregistrer le parcours' }}
+            </a>
             <button type="button" class="btn-secondary" (click)="openEdit(robot)">Modifier</button>
             <button type="button" class="btn-danger" (click)="remove(robot)">Supprimer</button>
           </div>

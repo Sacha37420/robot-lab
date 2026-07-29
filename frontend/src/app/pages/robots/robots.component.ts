@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { ApiService, Robot, RobotInput } from '../../core/api.service';
 
 const EMPTY_FORM: RobotInput = { name: '', description: '', start_url: '' };
@@ -8,7 +9,7 @@ const EMPTY_FORM: RobotInput = { name: '', description: '', start_url: '' };
 @Component({
   selector: 'app-robots',
   standalone: true,
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule, DatePipe, RouterLink],
   templateUrl: './robots.component.html',
   styleUrl: './robots.component.scss',
 })

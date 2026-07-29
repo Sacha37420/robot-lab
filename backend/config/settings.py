@@ -80,6 +80,12 @@ KEYCLOAK_CLIENT_ID = config('KEYCLOAK_CLIENT_ID', default='swagger-ui')
 # personne authentifiée sur ce client passe. Renseigné par create-app-client.sh
 # à partir de --require-group.
 KEYCLOAK_REQUIRED_GROUPS = config('KEYCLOAK_REQUIRED_GROUPS', default='')
+
+# ── engine/ (moteur d'enregistrement/exécution Playwright) ──────────────────────
+# Secret partagé pour le callback interne de vérification de ticket WS — même
+# famille que X-Setup-Key/SETUP_CATALOG_KEY (lab-admin/CatalogSyncView). Généré
+# automatiquement par setup2.sh s'il est absent du .env (openssl rand -hex 32).
+ENGINE_INTERNAL_KEY = config('ENGINE_INTERNAL_KEY', default='')
 # Prefer building the public issuer from KEYCLOAK_PUBLIC_URL + KEYCLOAK_REALM
 # (so we don't introduce a separate KEYCLOAK_PUBLIC_ISSUER_URI variable).
 KEYCLOAK_PUBLIC_URL = config('KEYCLOAK_PUBLIC_URL', default=None)
