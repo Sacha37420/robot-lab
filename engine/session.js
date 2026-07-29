@@ -9,6 +9,12 @@ const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || 'http://robot-lab-backen
 const ENGINE_KEY = process.env.ENGINE_INTERNAL_KEY || '';
 const DOWNLOAD_ROOT = process.env.ROBOT_DOWNLOAD_ROOT || '/downloads';
 const VIEWPORT = { width: 1280, height: 800 };
+// Fenêtre laissée à un téléchargement pour DÉMARRER après la dernière étape (un
+// export peut être préparé côté serveur avant d'être envoyé). Réglable sans
+// rebuild via le .env de l'app.
+const DOWNLOAD_GRACE_MS = Number(process.env.ROBOT_DOWNLOAD_GRACE_MS || 15000);
+// Plafond global de l'écriture, pour ne pas retenir le mutex de engine/ à vie.
+const DOWNLOAD_CAP_MS = Number(process.env.ROBOT_DOWNLOAD_CAP_MS || 180000);
 
 async function verifyTicket(token) {
   // Un backend lent/injoignable ne doit jamais bloquer `busy` indéfiniment —
@@ -43,6 +49,7 @@ function send(ws, payload) {
 async function setup(ws, token, steps) {
   const ticket = await verifyTicket(token);
   const isRun = ticket.mode === 'run';
+  let pendingDownloads = null;
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -52,7 +59,7 @@ async function setup(ws, token, steps) {
   const page = await context.newPage();
 
   if (isRun) {
-    await attachDownloads(context, page, ws, ticket.run_id);
+    pendingDownloads = await attachDownloads(context, page, ws, ticket.run_id);
   } else {
     // Capture des actions : uniquement en enregistrement. Pendant une exécution
     // il n'y a pas d'utilisateur qui agit, et réenregistrer ce que le robot fait
@@ -81,7 +88,7 @@ async function setup(ws, token, steps) {
   await page.goto(ticket.start_url, { waitUntil: 'domcontentloaded' });
   send(ws, { type: 'ready', startUrl: ticket.start_url, mode: ticket.mode });
 
-  return { browser, cdp, page, ticket };
+  return { browser, cdp, page, ticket, pendingDownloads };
 }
 
 /** Écrit les téléchargements du robot dans le dossier du run, et signale chaque
@@ -95,8 +102,14 @@ async function attachDownloads(context, page, ws, runId) {
   const directory = path.join(DOWNLOAD_ROOT, String(runId));
   await fs.mkdir(directory, { recursive: true });
 
+  // Écritures en cours. `saveAs` peut durer (fichier volumineux, serveur lent) :
+  // sans ce suivi, `browser.close()` coupait l'écriture en plein milieu et le
+  // fichier était tronqué ou perdu — sans message d'erreur, puisque la session
+  // se terminait normalement.
+  const pending = new Set();
+
   const onDownload = (download) => {
-    (async () => {
+    const task = (async () => {
       // Le nom vient du site distant : on ne garde que le nom de base, et le
       // chemin final est recomposé — jamais de concaténation du nom brut.
       const suggested = path.basename(download.suggestedFilename() || 'fichier');
@@ -111,10 +124,52 @@ async function attachDownloads(context, page, ws, runId) {
         send(ws, { type: 'error', message: `Téléchargement échoué : ${err.message || err}` });
       }
     })();
+    pending.add(task);
+    task.finally(() => pending.delete(task));
   };
 
   page.on('download', onDownload);
   context.on('page', (opened) => opened.on('download', onDownload));
+  return pending;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Laisse les téléchargements démarrer puis s'écrire avant de fermer la session.
+ *
+ * Deux attentes distinctes, et c'est important :
+ *  - le **démarrage** : beaucoup de sites préparent le fichier côté serveur
+ *    (génération d'un export, archive zip) et ne l'envoient que plusieurs
+ *    secondes après le clic. Le délai fixe de 1,5 s d'avant coupait ces cas.
+ *  - l'**écriture** : une fois démarré, `saveAs` doit aller au bout.
+ *
+ * On sort dès qu'il n'y a plus rien en attente, donc un parcours sans
+ * téléchargement ne paie que la fenêtre de démarrage.
+ */
+async function settleDownloads(ws, pending, { graceMs, capMs }) {
+  const startDeadline = Date.now() + graceMs;
+  while (pending.size === 0 && Date.now() < startDeadline) {
+    await sleep(250);
+  }
+  if (pending.size === 0) return;
+
+  send(ws, { type: 'note', note: 'téléchargement en cours — attente de la fin de l\'écriture' });
+
+  // Un téléchargement peut en déclencher un autre : on boucle jusqu'à ce que la
+  // file soit vide, sous un plafond global pour ne pas retenir le mutex de
+  // engine/ indéfiniment.
+  const hardDeadline = Date.now() + capMs;
+  while (pending.size > 0 && Date.now() < hardDeadline) {
+    await Promise.all([...pending]);
+    await sleep(250);
+  }
+  if (pending.size > 0) {
+    send(ws, {
+      type: 'error',
+      message: `${pending.size} téléchargement(s) toujours en cours après `
+             + `${Math.round(capMs / 1000)} s — fichier(s) possiblement incomplet(s).`,
+    });
+  }
 }
 
 /** Évite qu'un second fichier du même nom écrase le premier. */
@@ -133,7 +188,7 @@ async function uniqueName(directory, name) {
 }
 
 /** Rejoue le parcours enregistré, en signalant chaque étape au client. */
-async function replay(ws, page, ticket) {
+async function replay(ws, page, ticket, pendingDownloads) {
   let plan;
   try {
     plan = expand(ticket.steps || [], ticket.variables || {});
@@ -176,8 +231,12 @@ async function replay(ws, page, ticket) {
     }
   }
 
-  // Laisse le temps à un téléchargement déclenché par la dernière étape d'arriver.
-  await page.waitForTimeout(1500);
+  // La fin n'est annoncée qu'une fois les téléchargements écrits : sinon le
+  // client afficherait « terminé » avec une liste de fichiers incomplète.
+  if (pendingDownloads) {
+    await settleDownloads(ws, pendingDownloads,
+      { graceMs: DOWNLOAD_GRACE_MS, capMs: DOWNLOAD_CAP_MS });
+  }
   send(ws, { type: 'finished', total: plan.length });
 }
 
@@ -185,12 +244,14 @@ async function replay(ws, page, ticket) {
 export async function runSession(ws, token) {
   let browser = null;
   let cdp = null;
+  let pendingDownloads = null;
   const steps = [];
 
   try {
     const setupResult = await withTimeout(setup(ws, token, steps), 20000, 'Initialisation de la session');
     browser = setupResult.browser;
     cdp = setupResult.cdp;
+    pendingDownloads = setupResult.pendingDownloads;
     const { page, ticket } = setupResult;
 
     ws.on('message', (raw) => {
@@ -204,7 +265,7 @@ export async function runSession(ws, token) {
     if (ticket.mode === 'run') {
       // Course volontaire : le client peut fermer/arrêter en cours de rejeu.
       await Promise.race([
-        replay(ws, page, ticket),
+        replay(ws, page, ticket, pendingDownloads),
         new Promise((resolve) => {
           ws.once('close', resolve);
           ws.once('robotlab:stop', resolve);
@@ -219,6 +280,14 @@ export async function runSession(ws, token) {
   } catch (err) {
     send(ws, { type: 'error', message: String(err.message || err) });
   } finally {
+    // Un arrêt manuel ou un échec peut survenir pendant l'écriture d'un
+    // fichier : fermer le navigateur là tronquerait le téléchargement sans que
+    // rien ne le signale. On laisse les écritures déjà démarrées se terminer
+    // (sans nouvelle fenêtre d'attente au démarrage : la session est finie).
+    if (pendingDownloads && pendingDownloads.size > 0) {
+      await settleDownloads(ws, pendingDownloads, { graceMs: 0, capMs: DOWNLOAD_CAP_MS })
+        .catch(() => {});
+    }
     if (cdp) await cdp.send('Page.stopScreencast').catch(() => {});
     if (browser) await browser.close().catch(() => {});
     try { ws.close(1000, 'session ended'); } catch { /* déjà fermée */ }
