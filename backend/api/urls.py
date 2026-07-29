@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    AIProviderConfigView, AssistantView, RecordingTicketView, RobotViewSet,
+    AIProviderConfigView, AIStepView, AssistantView, RecordingTicketView, RobotViewSet,
     RunDownloadListView, RunDownloadView, RunTicketView, VerifyTicketView,
 )
 
@@ -20,5 +20,6 @@ urlpatterns = [
     # downloads.resolve_download(), pas par le routeur.
     path('runs/<int:run_id>/downloads/<path:name>/', RunDownloadView.as_view()),
     path('internal/verify-ticket/', VerifyTicketView.as_view()),
+    path('internal/ai-step/', AIStepView.as_view()),
     path('', include(router.urls)),
 ]

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { runAiTask } from './ai-pilot.js';
 import { captureInit } from './capture-script.js';
 import { describe, expand, runStep } from './replay.js';
 
@@ -147,7 +148,17 @@ async function replay(ws, page, ticket) {
     const step = plan[i];
     send(ws, { type: 'progress', index: i + 1, total: plan.length, label: describe(step) });
     try {
-      await runStep(page, step);
+      if (step.action === 'ai_task') {
+        const outcome = await runAiTask(page, step, {
+          runId: ticket.run_id,
+          maxIterations: ticket.max_ai_iterations,
+          report: (payload) => send(ws, payload),
+        });
+        if (!outcome.ok) throw new Error(outcome.note);
+        send(ws, { type: 'ai_done', note: outcome.note });
+      } else {
+        await runStep(page, step);
+      }
     } catch (err) {
       // On arrête au premier échec : continuer sur une page qui n'est pas celle
       // attendue enchaîne des erreurs sans rapport et masque la vraie cause.

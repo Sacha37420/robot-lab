@@ -30,6 +30,17 @@ Un parcours est une liste plate d'étapes. Chaque étape est un objet avec un ch
 être figé en étapes (mise en page qui change, étape imprévisible, choix à faire au \
 vu de la page). Champs : `objective` (obligatoire — ce qu'il faut accomplir, décrit \
 concrètement), `expected_result` (à quoi on reconnaît que c'est fait).
+  Comment cette étape s'exécute, pour écrire de bons objectifs : au moment de \
+l'exécution, une IA reçoit tour par tour le titre de la page, son texte visible et \
+la **liste numérotée de ses éléments interactifs**, puis choisit une action (cliquer, \
+remplir, choisir une option, appuyer une touche, naviguer) jusqu'à déclarer l'objectif \
+atteint. Elle ne voit pas d'image de la page et ne peut agir que sur les éléments \
+listés. Un bon `objective` est donc formulé en termes de ce qui est visible et \
+actionnable sur la page (« accepter la bannière de cookies, quel que soit le libellé \
+du bouton »), pas en termes de position ou d'apparence (« cliquer le bouton en bas à \
+droite »). Un bon `expected_result` est un signe reconnaissable dans le texte de la \
+page (« la liste des factures est affichée »). Le nombre de tours est plafonné : un \
+objectif doit rester une portion courte du parcours, pas le parcours entier.
 - `loop_start` — début d'une boucle. Champs : `variable` (obligatoire — le nom de la \
 variable qui prend successivement chaque valeur), `values` (la liste des valeurs).
 - `loop_end` — fin de la boucle ouverte par le dernier `loop_start`.

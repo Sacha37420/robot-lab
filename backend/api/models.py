@@ -79,6 +79,9 @@ class RobotRun(models.Model):
 
     robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name='runs')
     owner_email = models.EmailField()
+    # Fournisseur qui pilotera les étapes « tâche IA » de cette exécution.
+    # Choisi au lancement : c'est la clé de cet utilisateur qui sera facturée.
+    ai_provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

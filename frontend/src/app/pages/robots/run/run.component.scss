@@ -105,6 +105,65 @@
   .line-running { color: var(--accent-deep); font-weight: 600; }
   .line-done    { color: var(--text-mute); }
   .line-failed  { color: var(--danger); font-weight: 600; }
+
+  // Les tours du pilote IA sont en retrait sous l'étape qui les a déclenchés.
+  .line-ai {
+    list-style: none;
+    margin-left: var(--space-3);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--accent);
+    color: var(--text);
+  }
+
+  .reasoning {
+    display: block;
+    color: var(--text-mute);
+    font-style: italic;
+  }
+}
+
+.start-panel {
+  max-width: 520px;
+
+  h3 { font-size: var(--text-lg); }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+
+  span {
+    font-weight: 600;
+    color: var(--text-mute);
+  }
+
+  select {
+    height: 40px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-size: var(--text-sm);
+  }
+}
+
+.btn-primary {
+  height: 40px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-on);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  align-self: flex-start;
+  transition: opacity 0.15s;
+
+  &:hover { opacity: 0.85; }
 }
 
 .files li {

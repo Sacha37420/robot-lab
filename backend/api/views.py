@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from . import prompts
 from .ai_client import AIError, AINotConfigured, complete_json
+from .ai_pilot import MAX_ITERATIONS, PilotError, next_action
 from .downloads import list_downloads, resolve_download
 from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun
 from .serializers import AIProviderConfigSerializer, RobotSerializer
@@ -93,9 +94,25 @@ class RunTicketView(APIView):
                 {'detail': "Ce robot n'a pas encore de parcours enregistré."}, status=400,
             )
 
+        provider = (request.data.get('provider') or '').strip()
+        if provider and provider not in _VALID_PROVIDERS:
+            return Response({'detail': f"Fournisseur inconnu : « {provider} »."}, status=400)
+
+        # Une étape « tâche IA » ne peut pas s'exécuter sans fournisseur : le dire
+        # au lancement vaut mieux que d'échouer au milieu du parcours.
+        needs_ai = any(step.get('action') == 'ai_task' for step in robot.steps)
+        if needs_ai and not provider:
+            return Response(
+                {'detail': "Ce parcours contient une étape « tâche IA » : "
+                           "choisissez le fournisseur IA qui doit la piloter."},
+                status=400,
+            )
+
         EngineTicket.objects.filter(robot=robot, consumed_at__isnull=True).delete()
 
-        run = RobotRun.objects.create(robot=robot, owner_email=request.user.email)
+        run = RobotRun.objects.create(
+            robot=robot, owner_email=request.user.email, ai_provider=provider,
+        )
         ticket = EngineTicket.objects.create(
             robot=robot, owner_email=request.user.email, mode='run', run=run,
         )
@@ -139,7 +156,61 @@ class VerifyTicketView(APIView):
             # d'enregistrement n'a aucune raison de le connaître.
             'steps': ticket.robot.steps if ticket.mode == 'run' else [],
             'variables': ticket.robot.variables if ticket.mode == 'run' else {},
+            'ai_provider': ticket.run.ai_provider if ticket.run_id else '',
+            'max_ai_iterations': MAX_ITERATIONS,
         })
+
+
+class AIStepView(APIView):
+    """
+    POST /api/internal/ai-step/ — appelé par `engine/` pendant une étape
+    « tâche IA » : reçoit l'état de la page, renvoie l'action suivante.
+
+    Authentifié par secret partagé (X-Engine-Key), comme verify-ticket. C'est
+    Django qui appelle le fournisseur IA : la clé de l'utilisateur, déchiffrée
+    seulement ici, n'entre jamais dans le conteneur `engine/`.
+
+    Body : {run_id, objective, expected_result, page, history}
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        key = request.headers.get('X-Engine-Key', '')
+        if not settings.ENGINE_INTERNAL_KEY or key != settings.ENGINE_INTERNAL_KEY:
+            return Response({'detail': 'Clé invalide.'}, status=403)
+
+        run = get_object_or_404(RobotRun, pk=request.data.get('run_id'))
+        if not run.ai_provider:
+            return Response(
+                {'detail': "Aucun fournisseur IA n'a été choisi pour cette exécution."},
+                status=409,
+            )
+
+        objective = (request.data.get('objective') or '').strip()
+        if not objective:
+            return Response({'detail': 'Objectif manquant.'}, status=400)
+
+        page = request.data.get('page')
+        if not isinstance(page, dict):
+            return Response({'detail': 'État de page manquant.'}, status=400)
+
+        try:
+            action = next_action(
+                run.owner_email,
+                run.ai_provider,
+                objective,
+                (request.data.get('expected_result') or '').strip(),
+                page,
+                request.data.get('history') or [],
+            )
+        except AINotConfigured as exc:
+            return Response({'detail': str(exc)}, status=409)
+        except (AIError, PilotError) as exc:
+            return Response({'detail': str(exc)}, status=502)
+
+        return Response(action)
 
 
 class RunDownloadListView(APIView):

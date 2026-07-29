@@ -9,6 +9,33 @@
     </div>
   </div>
 
+  @if (status() === 'loading') {
+    <p class="status">Chargement…</p>
+  }
+
+  @if (status() === 'ready') {
+    <section class="panel start-panel">
+      <h3>{{ robot()?.name }}</h3>
+      <p class="hint">{{ robot()?.steps?.length || 0 }} étape(s) au parcours.</p>
+
+      @if (needsAi()) {
+        <p class="hint">
+          Ce parcours contient une étape « tâche IA » : choisissez le fournisseur qui
+          la pilotera. C'est votre clé qui sera utilisée.
+        </p>
+        <label class="field">
+          <span>Fournisseur IA</span>
+          <select [(ngModel)]="provider">
+            <option value="claude">Claude</option>
+            <option value="mistral">Mistral</option>
+          </select>
+        </label>
+      }
+
+      <button type="button" class="btn-primary" (click)="start()">Lancer le robot</button>
+    </section>
+  }
+
   @if (status() === 'connecting') {
     <p class="status">Démarrage du robot…</p>
   }
@@ -19,7 +46,7 @@
     <p class="saved">Exécution terminée.</p>
   }
 
-  @if (status() !== 'connecting') {
+  @if (status() === 'running' || status() === 'finished' || (status() === 'failed' && frameSrc())) {
     <div class="run-layout">
       <div class="viewport">
         @if (frameSrc()) {
@@ -65,7 +92,12 @@
           <h3>Journal</h3>
           <ol class="log">
             @for (line of log(); track $index) {
-              <li [class]="'line-' + line.state">{{ line.label }}</li>
+              <li [class]="'line-' + line.state" [class.line-ai]="line.ai">
+                {{ line.label }}
+                @if (line.reasoning) {
+                  <span class="reasoning">{{ line.reasoning }}</span>
+                }
+              </li>
             }
             @if (log().length === 0) {
               <li class="empty">En attente…</li>

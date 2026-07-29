@@ -1,12 +1,15 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { ApiService } from '../../../core/api.service';
+import { AIProvider, ApiService, Robot } from '../../../core/api.service';
 
 type EngineMessage =
   | { type: 'ready'; startUrl: string; mode: string }
   | { type: 'frame'; data: string }
   | { type: 'plan'; total: number }
   | { type: 'progress'; index: number; total: number; label: string }
+  | { type: 'ai_action'; turn: number; total: number; label: string; reasoning: string }
+  | { type: 'ai_done'; note: string }
   | { type: 'download'; name: string; size: number }
   | { type: 'failed'; index: number; label: string; message: string }
   | { type: 'finished'; total: number }
@@ -15,6 +18,9 @@ type EngineMessage =
 interface LogLine {
   label: string;
   state: 'running' | 'done' | 'failed';
+  /** Ligne produite par le pilote IA — affichée en retrait, avec son raisonnement. */
+  ai?: boolean;
+  reasoning?: string;
 }
 
 interface DownloadedFile {
@@ -26,7 +32,7 @@ interface DownloadedFile {
 @Component({
   selector: 'app-run',
   standalone: true,
-  imports: [RouterLink],
+  imports: [FormsModule, RouterLink],
   templateUrl: './run.component.html',
   styleUrl: './run.component.scss',
 })
@@ -38,7 +44,11 @@ export class RunComponent implements OnInit, OnDestroy {
   private ws: WebSocket | null = null;
   private runId = 0;
 
-  status = signal<'connecting' | 'running' | 'finished' | 'failed'>('connecting');
+  robot = signal<Robot | null>(null);
+  needsAi = signal(false);
+  provider: AIProvider = 'claude';
+
+  status = signal<'loading' | 'ready' | 'connecting' | 'running' | 'finished' | 'failed'>('loading');
   message = signal<string | null>(null);
   frameSrc = signal<string | null>(null);
   progress = signal<{ index: number; total: number } | null>(null);
@@ -46,7 +56,32 @@ export class RunComponent implements OnInit, OnDestroy {
   files = signal<DownloadedFile[]>([]);
 
   ngOnInit(): void {
-    this.api.getRunTicket(this.robotId).subscribe({
+    this.api.getRobot(this.robotId).subscribe({
+      next: (robot) => {
+        this.robot.set(robot);
+        // Le choix du fournisseur n'est demandé que si le parcours en a besoin.
+        this.needsAi.set(robot.steps.some(s => s.action === 'ai_task'));
+        this.status.set('ready');
+      },
+      error: () => {
+        this.status.set('failed');
+        this.message.set('Impossible de charger ce robot.');
+      },
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.ws?.close();
+  }
+
+  start(): void {
+    this.status.set('connecting');
+    this.message.set(null);
+    this.log.set([]);
+    this.files.set([]);
+    this.progress.set(null);
+
+    this.api.getRunTicket(this.robotId, this.needsAi() ? this.provider : undefined).subscribe({
       next: ({ ticket, run_id }) => { this.runId = run_id; this.connect(ticket); },
       error: (err) => {
         this.status.set('failed');
@@ -55,10 +90,6 @@ export class RunComponent implements OnInit, OnDestroy {
         );
       },
     });
-  }
-
-  ngOnDestroy(): void {
-    this.ws?.close();
   }
 
   private connect(ticket: string): void {
@@ -96,11 +127,23 @@ export class RunComponent implements OnInit, OnDestroy {
 
       case 'progress':
         this.progress.set({ index: msg.index, total: msg.total });
-        // L'étape précédente est terminée dès que la suivante commence.
-        this.log.update(lines => [
-          ...lines.map(l => (l.state === 'running' ? { ...l, state: 'done' as const } : l)),
-          { label: msg.label, state: 'running' },
-        ]);
+        this.closeRunning();
+        this.log.update(lines => [...lines, { label: msg.label, state: 'running' }]);
+        break;
+
+      case 'ai_action':
+        this.log.update(lines => [...lines, {
+          label: `IA (tour ${msg.turn}/${msg.total}) — ${msg.label}`,
+          state: 'done',
+          ai: true,
+          reasoning: msg.reasoning,
+        }]);
+        break;
+
+      case 'ai_done':
+        this.log.update(lines => [...lines, {
+          label: `IA : ${msg.note}`, state: 'done', ai: true,
+        }]);
         break;
 
       case 'download':
@@ -117,9 +160,7 @@ export class RunComponent implements OnInit, OnDestroy {
 
       case 'finished':
         this.status.set('finished');
-        this.log.update(lines =>
-          lines.map(l => (l.state === 'running' ? { ...l, state: 'done' as const } : l)),
-        );
+        this.closeRunning();
         break;
 
       case 'error':
@@ -127,6 +168,12 @@ export class RunComponent implements OnInit, OnDestroy {
         this.message.set(msg.message);
         break;
     }
+  }
+
+  private closeRunning(): void {
+    this.log.update(lines =>
+      lines.map(l => (l.state === 'running' ? { ...l, state: 'done' as const } : l)),
+    );
   }
 
   /** Récupère le fichier et déclenche l'enregistrement côté navigateur.

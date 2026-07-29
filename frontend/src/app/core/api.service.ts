@@ -96,9 +96,9 @@ export class ApiService {
     return this.http.post<{ ticket: string }>(`${this.base}/api/robots/${id}/recording-ticket/`, {});
   }
 
-  getRunTicket(id: number): Observable<{ ticket: string; run_id: number }> {
+  getRunTicket(id: number, provider?: AIProvider): Observable<{ ticket: string; run_id: number }> {
     return this.http.post<{ ticket: string; run_id: number }>(
-      `${this.base}/api/robots/${id}/run-ticket/`, {},
+      `${this.base}/api/robots/${id}/run-ticket/`, provider ? { provider } : {},
     );
   }
 

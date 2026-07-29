@@ -105,10 +105,11 @@ export async function runStep(page, step) {
       return;
 
     case 'ai_task':
-      // Lot 5. Échouer explicitement vaut mieux que sauter en silence : sauter
-      // ferait échouer les étapes suivantes sans que la cause soit visible.
+      // Piloté par l'IA (Lot 5). Traité en amont par session.js, qui dispose du
+      // contexte du run (fournisseur, plafond d'itérations) : si on arrive ici,
+      // c'est que ce contexte manque.
       throw new Error(
-        `Étape « tâche IA » pas encore exécutable (prévue au Lot 5) : ${step.objective}`,
+        "Étape « tâche IA » : aucun fournisseur IA n'est associé à cette exécution.",
       );
 
     default:
