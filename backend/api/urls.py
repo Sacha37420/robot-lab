@@ -1,7 +1,9 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import AIProviderConfigView, RecordingTicketView, RobotViewSet, VerifyTicketView
+from .views import (
+    AIProviderConfigView, AssistantView, RecordingTicketView, RobotViewSet, VerifyTicketView,
+)
 
 router = DefaultRouter()
 router.register('robots', RobotViewSet, basename='robot')
@@ -9,6 +11,7 @@ router.register('robots', RobotViewSet, basename='robot')
 urlpatterns = [
     path('ai-config/<str:provider>/', AIProviderConfigView.as_view()),
     path('robots/<int:pk>/recording-ticket/', RecordingTicketView.as_view()),
+    path('robots/<int:pk>/assistant/', AssistantView.as_view()),
     path('internal/verify-ticket/', VerifyTicketView.as_view()),
     path('', include(router.urls)),
 ]

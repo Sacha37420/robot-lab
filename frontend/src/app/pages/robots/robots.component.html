@@ -63,6 +63,9 @@
             <a [routerLink]="['/robots', robot.id, 'enregistrer']" class="btn-secondary">
               {{ robot.steps.length > 0 ? 'Réenregistrer' : 'Enregistrer le parcours' }}
             </a>
+            @if (robot.steps.length > 0) {
+              <a [routerLink]="['/robots', robot.id, 'assistant']" class="btn-secondary">Assistant IA</a>
+            }
             <button type="button" class="btn-secondary" (click)="openEdit(robot)">Modifier</button>
             <button type="button" class="btn-danger" (click)="remove(robot)">Supprimer</button>
           </div>

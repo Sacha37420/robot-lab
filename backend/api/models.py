@@ -49,6 +49,9 @@ class Robot(models.Model):
     description = models.TextField(blank=True)
     start_url = models.URLField()
     steps = models.JSONField(default=list, blank=True)
+    # Valeurs des variables sur lesquelles les boucles itèrent
+    # ({'reference': ['A1', 'B2']}), introduites par l'assistant IA du Lot 3.
+    variables = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

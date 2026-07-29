@@ -1,0 +1,105 @@
+<main class="page-assistant">
+  <div class="page-head">
+    <h2>Assistant — {{ robot()?.name || '…' }}</h2>
+    <a routerLink="/robots" class="btn-secondary">← Retour</a>
+  </div>
+
+  @if (loading()) {
+    <p class="status">Chargement…</p>
+  } @else {
+
+    <section class="card">
+      <p class="intro">
+        Décrivez en français ce que vous voulez changer. L'assistant propose une nouvelle
+        version du parcours — <strong>rien n'est modifié tant que vous n'avez pas accepté</strong>.
+      </p>
+
+      <label class="field">
+        <span>Ce que vous voulez modifier</span>
+        <textarea
+          rows="4"
+          [(ngModel)]="instruction"
+          placeholder="ex. transforme le numéro de commande en variable pour boucler sur plusieurs commandes ; ou : à l'étape du formulaire, laisse l'IA choisir la bonne option selon la page"
+        ></textarea>
+      </label>
+
+      <label class="field">
+        <span>Fournisseur IA</span>
+        <select [(ngModel)]="provider">
+          <option value="claude">Claude</option>
+          <option value="mistral">Mistral</option>
+        </select>
+      </label>
+
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
+      }
+      @if (applied()) {
+        <p class="saved">Modifications enregistrées.</p>
+      }
+
+      <button type="button" class="btn-primary" [disabled]="asking() || !instruction.trim()" (click)="ask()">
+        {{ asking() ? 'L\'assistant réfléchit…' : 'Proposer des modifications' }}
+      </button>
+    </section>
+
+    @if (proposal(); as p) {
+      <section class="card proposal">
+        <h3>Proposition</h3>
+        <p class="explanation">{{ p.explanation }}</p>
+
+        @if (changedCount() === 0) {
+          <p class="status">L'assistant n'a proposé aucun changement.</p>
+        } @else {
+          <p class="status">{{ changedCount() }} étape(s) concernée(s) sur {{ diff().length }}.</p>
+
+          <div class="diff-scroll">
+            <table class="diff">
+              <thead>
+                <tr><th>#</th><th>Avant</th><th>Après</th></tr>
+              </thead>
+              <tbody>
+                @for (row of diff(); track row.index) {
+                  <tr [class]="'row-' + row.status">
+                    <td class="num">{{ row.index }}</td>
+                    <td>{{ describe(row.before) }}</td>
+                    <td>{{ describe(row.after) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+        @if (variableEntries(p.variables).length > 0) {
+          <h4>Variables</h4>
+          <ul class="variables">
+            @for (entry of variableEntries(p.variables); track entry.name) {
+              <li><strong>{{ entry.name }}</strong> : {{ entry.values.join(', ') }}</li>
+            }
+          </ul>
+        }
+
+        <div class="proposal-actions">
+          <button type="button" class="btn-secondary" (click)="reject()">Rejeter</button>
+          <button type="button" class="btn-primary" [disabled]="applying()" (click)="apply()">
+            {{ applying() ? 'Enregistrement…' : 'Accepter et enregistrer' }}
+          </button>
+        </div>
+      </section>
+    }
+
+    <section class="card">
+      <h3>Parcours actuel ({{ robot()?.steps?.length || 0 }} étape(s))</h3>
+      @if ((robot()?.steps?.length || 0) === 0) {
+        <p class="status">Aucun parcours enregistré — enregistrez-en un d'abord.</p>
+      } @else {
+        <ol class="steps-list">
+          @for (step of robot()!.steps; track $index) {
+            <li>{{ describe(step) }}</li>
+          }
+        </ol>
+      }
+    </section>
+  }
+</main>

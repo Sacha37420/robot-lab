@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import AIProviderConfig, Robot
+from .steps import StepError, validate_steps
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -22,16 +23,25 @@ class RobotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Robot
         fields = [
-            'id', 'name', 'description', 'start_url', 'steps',
+            'id', 'name', 'description', 'start_url', 'steps', 'variables',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate_steps(self, value):
-        if not isinstance(value, list) or not all(
-            isinstance(step, dict) and step.get('action') for step in value
-        ):
-            raise serializers.ValidationError(
-                "Doit être une liste d'étapes, chacune avec une clé 'action'."
-            )
+        # Même validateur que pour les étapes proposées par l'IA : rien qui ne
+        # soit décrit dans steps.py n'entre en base, quelle qu'en soit l'origine.
+        try:
+            return validate_steps(value)
+        except StepError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+    def validate_variables(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Doit être un objet nom → valeurs.')
+        for name, values in value.items():
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                raise serializers.ValidationError(
+                    f"Variable « {name} » : doit être une liste de chaînes."
+                )
         return value
