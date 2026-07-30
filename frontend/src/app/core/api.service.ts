@@ -45,9 +45,33 @@ export interface RobotStep {
   objective?: string;
   expected_result?: string;
   values?: string[];
+  /** HTML capturé autour de l'élément à l'enregistrement, du plus étroit au
+   *  plus large — contexte donné à l'assistant de modification, jamais
+   *  éditable à la main (cf. INTERNAL_FIELDS côté backend). */
+  context?: string[];
 }
 
 export type RobotVariables = Record<string, string[]>;
+
+export type RunLogState = 'done' | 'failed';
+
+export interface RunLogLine {
+  index: number;
+  label: string;
+  state: RunLogState;
+  note?: string;
+}
+
+/** Résultat conservé du dernier test mené à son terme — `null` si aucun test
+ *  n'a encore été lancé pour ce robot. */
+export interface LastRun {
+  status: 'success' | 'failed' | 'error' | 'stopped';
+  status_display: string;
+  created_at: string;
+  finished_at: string;
+  log: RunLogLine[];
+  error_message: string;
+}
 
 export interface Robot {
   id: number;
@@ -59,6 +83,7 @@ export interface Robot {
   /** Calculé par le serveur : ce qui empêcherait le robot de faire son travail
    *  (boucle sans valeur…). Vide quand tout va bien. */
   warnings: string[];
+  last_run: LastRun | null;
   created_at: string;
   updated_at: string;
 }
@@ -146,6 +171,20 @@ export class ApiService {
   getRunTicket(id: number, provider?: AIProvider): Observable<{ ticket: string; run_id: number }> {
     return this.http.post<{ ticket: string; run_id: number }>(
       `${this.base}/api/robots/${id}/run-ticket/`, provider ? { provider } : {},
+    );
+  }
+
+  /** Consigne le résultat d'une exécution terminée — `engine/` ne peut pas le
+   *  faire lui-même (aucun droit d'écriture en base), c'est donc le frontend,
+   *  qui porte le vrai jeton de la personne, qui le rapporte une fois la
+   *  session WebSocket close. Sert à la fois à l'afficher dans l'éditeur et à
+   *  le donner en contexte à l'assistant. */
+  reportRunResult(
+    robotId: number, runId: number,
+    result: { status: string; log: RunLogLine[]; message?: string },
+  ): Observable<void> {
+    return this.http.post<void>(
+      `${this.base}/api/robots/${robotId}/runs/${runId}/result/`, result,
     );
   }
 

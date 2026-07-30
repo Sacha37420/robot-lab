@@ -9,16 +9,29 @@ sorties structurées des API LLM ne supportent pas les schémas récursifs, et u
 liste plate se rejoue avec une simple pile côté moteur.
 """
 
+# Étapes qui ciblent un élément précis : seules celles-là portent un `context`
+# (HTML capturé autour de l'élément à l'enregistrement — cf. `CONTEXT_LEVELS`
+# plus bas). Un `goto`/`scroll`/`dialog` n'a pas d'élément à situer.
+CONTEXT_ACTIONS = {'click', 'fill', 'select', 'press'}
+
+# Nombre max de niveaux de contexte HTML par étape, et taille max d'un niveau.
+# Purement défensif : `engine/capture-script.js` capture déjà dans ces bornes,
+# ceci protège contre une valeur fantaisiste réintroduite via un PATCH manuel.
+CONTEXT_MAX_LEVELS = 4
+CONTEXT_MAX_CHARS = 8000
+
 # action → champs autorisés en plus de 'action' (tous optionnels sauf mention)
 STEP_SCHEMA = {
     'goto':       {'url'},
     # `position` : point d'impact du clic dans l'élément (+ ses dimensions à
     # l'enregistrement), pour les cibles où le centre ne suffit pas — canevas,
     # carte, curseur, grande zone dont seule une partie réagit.
-    'click':      {'selector', 'text', 'position'},
-    'fill':       {'selector', 'value', 'variable', 'masked'},
-    'select':     {'selector', 'value', 'variable'},
-    'press':      {'selector', 'key'},
+    # `context` : HTML autour de l'élément au moment du clic, du plus étroit
+    # (l'élément lui-même) au plus large — cf. section « Contexte HTML ».
+    'click':      {'selector', 'text', 'position', 'context'},
+    'fill':       {'selector', 'value', 'variable', 'masked', 'context'},
+    'select':     {'selector', 'value', 'variable', 'context'},
+    'press':      {'selector', 'key', 'context'},
     # Position de défilement de la page — nécessaire aux pages qui chargent leur
     # contenu au fur et à mesure (liste infinie).
     'scroll':     {'x', 'y'},
@@ -108,6 +121,11 @@ ACTION_LABELS = {
 # un sélecteur, exactement ce que `invented_selectors()` refuse à l'IA.
 ADDABLE_ACTIONS = ('goto', 'scroll', 'ai_task', 'loop_start', 'loop_end', 'dialog')
 
+# Champs gérés par le système, jamais par une personne : ne figurent pas dans
+# le vocabulaire servi à l'éditeur manuel (`context` est capturé à
+# l'enregistrement et sert de contexte à l'assistant, pas un champ à remplir).
+INTERNAL_FIELDS = {'context'}
+
 
 def schema_payload():
     """Vocabulaire d'étapes sous forme sérialisable, pour l'éditeur manuel."""
@@ -125,6 +143,7 @@ def schema_payload():
                         'required': name in REQUIRED_FIELDS[action],
                     }
                     for name in sorted(STEP_SCHEMA[action])
+                    if name not in INTERNAL_FIELDS
                 ],
             }
             for action in ACTIONS
@@ -201,6 +220,22 @@ def validate_steps(steps):
             raise StepError(
                 f'Étape {index} (dialog) : accept doit valoir true ou false.'
             )
+
+        # `context` n'est jamais fourni par une personne (capturé à
+        # l'enregistrement, `INTERNAL_FIELDS`) ni par l'IA (absent de son
+        # schéma de réponse) — seul un PATCH manuel fabriqué à la main pourrait
+        # y glisser une valeur fantaisiste. Bornée par mesure défensive.
+        if 'context' in step:
+            context = step['context']
+            if (
+                not isinstance(context, list)
+                or len(context) > CONTEXT_MAX_LEVELS
+                or not all(isinstance(v, str) and len(v) <= CONTEXT_MAX_CHARS for v in context)
+            ):
+                raise StepError(
+                    f'Étape {index} ({action}) : context doit être une liste d\'au plus '
+                    f'{CONTEXT_MAX_LEVELS} chaînes de {CONTEXT_MAX_CHARS} caractères chacune.'
+                )
 
         if action == 'loop_start':
             depth += 1
@@ -279,3 +314,79 @@ def invented_selectors(previous_steps, proposed_steps):
         if isinstance(step, dict) and step.get('selector')
         and step['selector'] not in known
     ]
+
+
+def steps_for_prompt(steps, shown_levels=None):
+    """Parcours prêt à envoyer à l'IA, `context` réduit au niveau autorisé.
+
+    `context[0]` (l'élément lui-même) est ce que l'IA voit par défaut — assez
+    pour la plupart des demandes, sans faire payer à chaque appel le HTML
+    complet de tout le parcours. `shown_levels` ({index 1-based: niveau}) fait
+    monter certaines étapes vers un contexte plus large, sur demande de l'IA
+    (cf. `AssistantView`, boucle `need_more_context`). L'index de contexte le
+    plus large disponible est toujours signalé, pour que l'IA sache qu'il lui
+    reste ou non une marge à demander.
+    """
+    shown_levels = shown_levels or {}
+    rendered = []
+    for index, step in enumerate(steps or [], 1):
+        if not isinstance(step, dict):
+            rendered.append(step)
+            continue
+        clean = {k: v for k, v in step.items() if k != 'context'}
+        context = step.get('context')
+        if context:
+            level = min(shown_levels.get(index, 0), len(context) - 1)
+            clean['context_shown'] = context[level]
+            if level < len(context) - 1:
+                clean['context_available'] = (
+                    f"contexte plus large disponible — need_more_context: [{index}]"
+                )
+        rendered.append(clean)
+    return rendered
+
+
+def restore_context(previous_steps, steps):
+    """Rattache aux étapes proposées le `context` de l'étape d'origine au même
+    sélecteur (l'IA ne le reçoit jamais en entier et ne le renvoie jamais dans
+    sa réponse — absent de `RESPONSE_SCHEMA`). Sans ça, toute modification
+    acceptée effacerait le contexte HTML capturé à l'enregistrement, y compris
+    sur les étapes que l'IA n'a pas touchées.
+
+    Sûr par construction : `invented_selectors()` a déjà garanti que tout
+    sélecteur présent dans `steps` existait déjà dans `previous_steps`.
+    """
+    by_selector = {}
+    for step in previous_steps or []:
+        if isinstance(step, dict) and step.get('selector') and step.get('context'):
+            by_selector.setdefault(step['selector'], step['context'])
+
+    for step in steps or []:
+        if not isinstance(step, dict) or step.get('context'):
+            continue
+        context = by_selector.get(step.get('selector'))
+        if context:
+            step['context'] = context
+    return steps
+
+
+def last_run_summary(run):
+    """Résumé compact du dernier test conservé, pour le contexte de l'IA.
+
+    `None` si aucune exécution n'a encore été menée à son terme — l'IA doit
+    alors dire qu'aucun test n'a été fait plutôt que d'improviser.
+    """
+    if run is None or run.status == 'running':
+        return None
+
+    lines = [f"Dernier test ({run.get_status_display()}, {run.created_at:%Y-%m-%d %H:%M}) :"]
+    failed = [entry for entry in (run.log or []) if entry.get('state') == 'failed']
+    if failed:
+        for entry in failed:
+            note = f" — {entry['note']}" if entry.get('note') else ''
+            lines.append(f"  Étape {entry.get('index')} en échec : {entry.get('label')}{note}")
+    elif run.status == 'success':
+        lines.append(f"  Les {len(run.log or [])} étape(s) exécutée(s) ont réussi.")
+    if run.error_message:
+        lines.append(f"  Message : {run.error_message}")
+    return '\n'.join(lines)

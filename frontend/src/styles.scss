@@ -189,3 +189,47 @@ input[type="text"], input[type="number"], textarea, select {
 
   > span { font-weight: 600; color: var(--text-mute); }
 }
+
+/* ─── Bandeau de résultat (dernier test conservé, warnings) ──────────────
+   Remonté ici pour la même raison que les contrôles ci-dessus : réutilisé par
+   plusieurs pages, une septième copie locale ferait dépasser le budget de
+   style par composant sans rien ajouter. */
+.last-run {
+  border-left: 3px solid var(--success);
+  background: var(--success-tint);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.last-run-bad {
+  border-left-color: var(--danger);
+  background: var(--danger-tint);
+}
+
+.last-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.last-run-date { color: var(--text-mute); font-size: var(--text-xs); }
+
+.last-run ul {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.last-run-message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-mute);
+}

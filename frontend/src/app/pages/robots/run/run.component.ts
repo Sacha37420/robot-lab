@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { AIProvider, ApiService, Robot } from '../../../core/api.service';
+import { AIProvider, ApiService, Robot, RunLogLine } from '../../../core/api.service';
 
 type EngineMessage =
   | { type: 'ready'; startUrl: string; mode: string }
@@ -108,6 +108,7 @@ export class RunComponent implements OnInit, OnDestroy {
       if (this.status() === 'connecting' || this.status() === 'running') {
         this.status.set('failed');
         this.message.set(this.message() ?? 'La session a été interrompue.');
+        this.reportResult('error', this.message() ?? undefined);
       }
     };
   }
@@ -165,18 +166,38 @@ export class RunComponent implements OnInit, OnDestroy {
         this.log.update(lines =>
           lines.map(l => (l.state === 'running' ? { ...l, state: 'failed' as const } : l)),
         );
+        this.reportResult('failed', msg.message);
         break;
 
       case 'finished':
         this.status.set('finished');
         this.closeRunning();
+        this.reportResult('success');
         break;
 
       case 'error':
         this.status.set('failed');
         this.message.set(msg.message);
+        this.reportResult('error', msg.message);
         break;
     }
+  }
+
+  /** Consigne le résultat en base une fois l'exécution terminée — sans ça, le
+   *  résultat ne survivait pas à la fermeture de l'onglet, et l'assistant de
+   *  modification ne pouvait jamais savoir si le parcours avait déjà été
+   *  essayé. Best-effort : un échec de ce rapport n'affecte pas ce que la
+   *  personne voit déjà en direct dans le journal. */
+  private reportResult(status: string, message?: string): void {
+    if (!this.runId) return;
+    const log: RunLogLine[] = this.log().map((line, i) => ({
+      index: i + 1,
+      label: line.label,
+      state: line.state === 'failed' ? 'failed' : 'done',
+    }));
+    this.api.reportRunResult(this.robotId, this.runId, { status, log, message }).subscribe({
+      error: () => { /* best-effort — non bloquant pour l'utilisateur */ },
+    });
   }
 
   private closeRunning(): void {
@@ -212,6 +233,7 @@ export class RunComponent implements OnInit, OnDestroy {
     this.ws?.send(JSON.stringify({ type: 'stop' }));
     this.ws?.close();
     this.status.set('finished');
+    this.reportResult('stopped');
   }
 
   formatSize(bytes: number): string {

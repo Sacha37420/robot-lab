@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AIProviderConfigView, AIStepView, AssistantView, RecordingTicketView, RobotViewSet,
-    RunDownloadListView, RunDownloadView, RunTicketView, StepSchemaView, VerifyTicketView,
+    RunDownloadListView, RunDownloadView, RunResultView, RunTicketView, StepSchemaView,
+    VerifyTicketView,
 )
 
 router = DefaultRouter()
@@ -15,6 +16,7 @@ urlpatterns = [
     path('step-schema/', StepSchemaView.as_view()),
     path('robots/<int:pk>/recording-ticket/', RecordingTicketView.as_view()),
     path('robots/<int:pk>/run-ticket/', RunTicketView.as_view()),
+    path('robots/<int:pk>/runs/<int:run_id>/result/', RunResultView.as_view()),
     path('robots/<int:pk>/assistant/', AssistantView.as_view()),
     path('runs/<int:run_id>/downloads/', RunDownloadListView.as_view()),
     # <path:> et non <str:> : un nom de fichier venu d'un site tiers peut

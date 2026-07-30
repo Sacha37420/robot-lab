@@ -3,6 +3,7 @@ import json
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -13,10 +14,13 @@ from . import prompts
 from .ai_client import AIError, AINotConfigured, complete_json
 from .ai_pilot import MAX_ITERATIONS, PilotError, next_action
 from .downloads import list_downloads, resolve_download
-from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun
+from .models import (
+    PROVIDER_CHOICES, RUN_STATUS_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun,
+)
 from .serializers import AIProviderConfigSerializer, RobotSerializer
 from .steps import (
-    StepError, invented_selectors, loop_issues, schema_payload, validate_steps,
+    StepError, invented_selectors, last_run_summary, loop_issues, restore_context,
+    schema_payload, steps_for_prompt, validate_steps,
 )
 
 _VALID_PROVIDERS = {key for key, _ in PROVIDER_CHOICES}
@@ -119,6 +123,67 @@ class RunTicketView(APIView):
             robot=robot, owner_email=request.user.email, mode='run', run=run,
         )
         return Response({'ticket': ticket.token, 'run_id': run.id}, status=201)
+
+
+_RUN_STATUSES = {key for key, _ in RUN_STATUS_CHOICES}
+# Nombre max de lignes de journal conservées par test — un parcours déplié
+# (boucles comprises) peut compter des centaines d'étapes ; le détail complet
+# n'apporte rien de plus à l'assistant qu'un résumé des échecs et un total.
+MAX_RUN_LOG_LINES = 500
+
+
+def _clean_run_log(raw):
+    """Valide le journal envoyé par le frontend en fin d'exécution. Filtré
+    silencieusement plutôt que rejeté : un client imparfait ne doit pas
+    empêcher de conserver au moins le résultat global (`status`).
+    """
+    if not isinstance(raw, list):
+        return []
+    lines = []
+    for entry in raw[:MAX_RUN_LOG_LINES]:
+        if not isinstance(entry, dict):
+            continue
+        index, label, state = entry.get('index'), entry.get('label'), entry.get('state')
+        if not isinstance(index, int) or not isinstance(label, str) or state not in ('done', 'failed'):
+            continue
+        line = {'index': index, 'label': label[:300], 'state': state}
+        note = entry.get('note')
+        if isinstance(note, str) and note:
+            line['note'] = note[:500]
+        lines.append(line)
+    return lines
+
+
+class RunResultView(APIView):
+    """
+    POST /api/robots/<id>/runs/<run_id>/result/ — consigne le résultat d'une
+    exécution terminée (réussie, échouée, arrêtée par la personne, ou en erreur).
+
+    Appelé par le frontend, jamais par `engine/` : `engine/` ne détient aucun
+    droit d'écriture en base (propriété posée au Lot 2) et ne pourrait pas
+    s'authentifier ici — c'est le frontend, qui porte le vrai jeton Keycloak de
+    la personne, qui rapporte l'issue une fois la session WebSocket terminée.
+    Sans ce point d'entrée, un test ne laissait aucune trace consultable après
+    la fermeture de l'onglet, et l'assistant de modification ne pouvait jamais
+    savoir si le parcours avait déjà été essayé.
+    """
+
+    def post(self, request, pk, run_id):
+        robot = get_object_or_404(Robot, pk=pk)
+        if robot.owner_email != request.user.email:
+            raise PermissionDenied("Ce robot ne vous appartient pas.")
+        run = get_object_or_404(RobotRun, pk=run_id, robot=robot)
+
+        status = request.data.get('status')
+        if status not in _RUN_STATUSES or status == 'running':
+            return Response({'detail': f"Statut de résultat invalide : « {status} »."}, status=400)
+
+        run.status = status
+        run.log = _clean_run_log(request.data.get('log'))
+        run.error_message = (request.data.get('message') or '').strip()[:2000]
+        run.finished_at = timezone.now()
+        run.save(update_fields=['status', 'log', 'error_message', 'finished_at'])
+        return Response({'ok': True})
 
 
 class VerifyTicketView(APIView):
@@ -295,16 +360,58 @@ def _clean_history(raw):
     return turns
 
 
+# Tours d'élargissement de contexte HTML autorisés au-delà de l'appel initial
+# (cf. AssistantView._build_message / `need_more_context`). Borné : chaque tour
+# est un appel LLM complet, facturé à la personne — 2 suffisent largement pour
+# remonter du plus étroit (l'élément) au plus large capturé (un container
+# nommé ou le corps de page), au-delà duquel il n'y a de toute façon plus rien
+# à montrer.
+MAX_CONTEXT_ROUNDS = 2
+
+
+def _has_more_context(steps, shown_levels, index):
+    """L'étape `index` (1-based) a-t-elle un niveau de contexte HTML au-delà
+    de celui déjà montré ? Filtre les demandes d'élargissement de l'IA portant
+    sur un index hors parcours ou déjà à son niveau maximal — sans ce filtre,
+    une IA qui ignore `context_available` ferait tourner la boucle jusqu'à
+    `MAX_CONTEXT_ROUNDS` pour rien.
+    """
+    if not (1 <= index <= len(steps or [])):
+        return False
+    step = steps[index - 1]
+    if not isinstance(step, dict):
+        return False
+    context = step.get('context') or []
+    return shown_levels.get(index, 0) < len(context) - 1
+
+
 class AssistantView(APIView):
     """
     POST /api/robots/<id>/assistant/ — demande à l'IA une modification du parcours.
 
-    Body : {instruction: str, provider: 'claude'|'mistral'}
-    Renvoie une *proposition* ({steps, variables, explanation}) — rien n'est
-    enregistré ici. L'utilisateur relit puis applique via le PATCH habituel :
-    aucun contenu généré n'est appliqué sans validation humaine, et rien de ce
-    que l'IA renvoie n'échappe au validateur d'étapes.
+    Body : {instruction: str, provider: 'claude'|'mistral', history: [...]}
+    Renvoie une *proposition* ({steps, variables, explanation, warnings}) — rien
+    n'est enregistré ici. L'utilisateur relit puis applique via le PATCH
+    habituel : aucun contenu généré n'est appliqué sans validation humaine, et
+    rien de ce que l'IA renvoie n'échappe au validateur d'étapes.
     """
+
+    def _build_message(self, robot, instruction, shown_levels):
+        # Le parcours (contexte HTML compris) est renvoyé en entier à chaque
+        # tour, et fait foi : la personne peut l'avoir modifié à la main dans
+        # l'éditeur entre deux messages. Ne jamais se fier à une version vue
+        # plus haut dans la conversation.
+        summary = last_run_summary(robot.runs.exclude(status='running').first())
+        return (
+            f'Robot : {robot.name}\n'
+            f'Description : {robot.description or "(aucune)"}\n'
+            f'URL de départ : {robot.start_url}\n\n'
+            f'Parcours actuel (état réel en base, fait foi) :\n'
+            f'{json.dumps(steps_for_prompt(robot.steps, shown_levels), ensure_ascii=False, indent=1)}\n\n'
+            f'Variables actuelles :\n{json.dumps(robot.variables, ensure_ascii=False, indent=1)}\n\n'
+            f'{summary or "Dernier test : aucune exécution conservée pour ce robot."}\n\n'
+            f'Demande de la personne :\n{instruction}'
+        )
 
     def post(self, request, pk):
         robot = get_object_or_404(Robot, pk=pk)
@@ -318,25 +425,34 @@ class AssistantView(APIView):
         if provider not in _VALID_PROVIDERS:
             return Response({'detail': f"Fournisseur inconnu : « {provider} »."}, status=400)
 
-        # Le parcours est renvoyé en entier à chaque tour, et fait foi : la
-        # personne peut l'avoir modifié à la main dans l'éditeur entre deux
-        # messages. Ne jamais se fier à une version vue plus haut dans la
-        # conversation.
-        message = (
-            f'Robot : {robot.name}\n'
-            f'Description : {robot.description or "(aucune)"}\n'
-            f'URL de départ : {robot.start_url}\n\n'
-            f'Parcours actuel (état réel en base, fait foi) :\n'
-            f'{json.dumps(robot.steps, ensure_ascii=False, indent=1)}\n\n'
-            f'Variables actuelles :\n{json.dumps(robot.variables, ensure_ascii=False, indent=1)}\n\n'
-            f'Demande de la personne :\n{instruction}'
-        )
+        history = _clean_history(request.data.get('history'))
+        shown_levels = {}
+        message = self._build_message(robot, instruction, shown_levels)
 
         try:
-            result = complete_json(
-                request.user.email, provider, prompts.SYSTEM, message, prompts.RESPONSE_SCHEMA,
-                history=_clean_history(request.data.get('history')),
-            )
+            result = None
+            for round_index in range(MAX_CONTEXT_ROUNDS + 1):
+                result = complete_json(
+                    request.user.email, provider, prompts.SYSTEM, message,
+                    prompts.RESPONSE_SCHEMA, history=history,
+                )
+                requested = [
+                    i for i in (result.get('need_more_context') or [])
+                    if isinstance(i, int) and _has_more_context(robot.steps, shown_levels, i)
+                ]
+                if not requested or round_index == MAX_CONTEXT_ROUNDS:
+                    break
+                # Ce tour n'est qu'une étape intermédiaire, jamais montrée à la
+                # personne : il entre dans l'historique pour que le tour
+                # suivant garde le fil, avec un contexte élargi pour les
+                # étapes demandées.
+                history = history + [
+                    {'role': 'user', 'content': message},
+                    {'role': 'assistant', 'content': json.dumps(result, ensure_ascii=False)},
+                ]
+                for i in requested:
+                    shown_levels[i] = shown_levels.get(i, 0) + 1
+                message = self._build_message(robot, instruction, shown_levels)
         except AINotConfigured as exc:
             return Response({'detail': str(exc)}, status=409)
         except AIError as exc:
@@ -350,11 +466,13 @@ class AssistantView(APIView):
             )
 
         # Un sélecteur inédit ne peut pas venir d'une observation : le modèle ne
-        # voit jamais la page. La proposition entière est refusée plutôt que de
-        # laisser relire un sélecteur inventé à quelqu'un qui, par hypothèse, ne
-        # sait pas lire du code — la relecture humaine ne peut pas jouer son rôle
-        # de garde-fou sur ce champ-là. L'assistant garde toute latitude sur ce
-        # qui ne dépend pas du DOM : boucles, variables, tâches IA, navigations.
+        # voit jamais la page en direct (seulement le contexte HTML capturé à
+        # l'enregistrement, cf. ci-dessus). La proposition entière est refusée
+        # plutôt que de laisser relire un sélecteur inventé à quelqu'un qui, par
+        # hypothèse, ne sait pas lire du code — la relecture humaine ne peut pas
+        # jouer son rôle de garde-fou sur ce champ-là. L'assistant garde toute
+        # latitude sur ce qui ne dépend pas du DOM : boucles, variables, tâches
+        # IA, navigations.
         invented = invented_selectors(robot.steps, steps)
         if invented:
             details = ' ; '.join(f'étape {i} → {sel}' for i, sel in invented)
@@ -365,6 +483,11 @@ class AssistantView(APIView):
                 'étapes existantes, ou réenregistrez le parcours pour capturer le '
                 'nouvel élément.'
             )}, status=502)
+
+        # L'IA ne reçoit et ne renvoie jamais `context` (absent de son schéma de
+        # réponse) : sans ce rattachement, accepter la proposition effacerait le
+        # contexte HTML capturé sur toute étape, y compris celles non touchées.
+        steps = restore_context(robot.steps, steps)
 
         variables = result.get('variables')
         if not isinstance(variables, dict):

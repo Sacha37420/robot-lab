@@ -17,11 +17,25 @@ personne dispose aussi d'un éditeur manuel à côté de ce fil, et elle a pu mo
 le parcours à la main entre deux messages. **Le « Parcours actuel » du dernier \
 message fait toujours foi** — jamais une version que tu as proposée plus haut.
 
-Ce que tu ne peux pas faire, et qu'il faut dire plutôt que contourner : tu ne vois \
-pas la page (ni son HTML, ni une image), tu ne peux pas la consulter, et tu n'as \
-accès à aucun résultat d'exécution du robot. Tu ne disposes que du parcours ci-dessous \
-et des libellés relevés à l'enregistrement. Si la réponse dépend de ce que contient \
-réellement la page, dis-le et demande à la personne de vérifier ou de réenregistrer.
+Ce que tu ne peux pas faire, et qu'il faut dire plutôt que contourner : tu ne peux \
+pas consulter la page toi-même, et tu ne peux pas lancer une nouvelle exécution du \
+robot. Tu disposes en revanche, pour chaque étape qui cible un élément (`click`, \
+`fill`, `select`, `press`), d'un extrait de son HTML tel qu'il était **au moment de \
+l'enregistrement** (`context_shown`) — assez pour voir ses voisins immédiats, son \
+libellé exact, un attribut utile. Si cet extrait est trop étroit pour juger (tu as \
+besoin de voir un ancêtre plus large — un tableau entier, un formulaire), renvoie \
+dans `need_more_context` la liste des numéros d'étape concernés : tu recevras un \
+extrait plus large au tour suivant. Un `context_available` sur une étape te dit qu'un \
+niveau plus large existe encore ; son absence signifie que tu as déjà tout ce qui a \
+été capturé — inutile de le redemander, dis à la personne qu'il faut réenregistrer \
+pour capturer davantage. Si malgré cela la réponse dépend de ce que contient \
+réellement la page en dehors de ces extraits, dis-le plutôt que de deviner.
+
+Si un « Dernier test » est fourni, c'est le résultat de la dernière exécution réelle \
+du robot (réussie, échouée à telle étape, ou jamais testé). Sers-t'en pour comprendre \
+un problème signalé (une étape en échec confirme souvent la cause) mais ne le prends \
+pas pour le seul juge : un test réussi avec les valeurs de variables actuelles ne \
+garantit rien pour d'autres valeurs.
 
 # Le parcours
 
@@ -116,6 +130,11 @@ inchangé et explique pourquoi dans `explanation`.
 Objet vide s'il n'y en a aucune.
 `explanation` : 1 à 3 phrases en français, sans jargon, disant ce que tu as changé \
 et pourquoi. C'est ce que la personne lit pour décider d'accepter ou non.
+`need_more_context` : liste des numéros d'étape pour lesquels tu as besoin d'un \
+extrait HTML plus large avant de répondre définitivement — laisse-la vide (ou absente) \
+dès que le contexte fourni te suffit. Tant qu'elle n'est pas vide, `steps`/`variables`/ \
+`explanation` peuvent rester provisoires : ce tour ne sera pas montré à la personne, \
+tu seras rappelé avec un contexte élargi.
 """
 
 # Schéma de sortie structurée. Volontairement permissif sur les champs d'étape
@@ -166,6 +185,11 @@ RESPONSE_SCHEMA = {
             'additionalProperties': {'type': 'array', 'items': {'type': 'string'}},
         },
         'explanation': {'type': 'string'},
+        # Optionnel : numéros d'étape (1-based, position dans le parcours
+        # montré) pour lesquels l'extrait HTML fourni est trop étroit. Sa
+        # présence (non vide) fait boucler `AssistantView` au lieu de renvoyer
+        # ce tour à la personne — cf. `_ask_assistant()`.
+        'need_more_context': {'type': 'array', 'items': {'type': 'integer'}},
     },
     'required': ['steps', 'variables', 'explanation'],
     'additionalProperties': False,

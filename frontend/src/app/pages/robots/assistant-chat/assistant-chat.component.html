@@ -27,7 +27,7 @@
         <p class="msg-text">{{ message.content }}</p>
 
         @if (message.proposal; as p) {
-          @if (p.warnings?.length) {
+          @if (p.warnings.length) {
             <ul class="msg-warnings">
               @for (warning of p.warnings; track warning) {
                 <li>⚠ {{ warning }}</li>

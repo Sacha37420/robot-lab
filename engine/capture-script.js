@@ -35,6 +35,61 @@ export function captureInit() {
     if (window.__robotLabRecord__) window.__robotLabRecord__(payload);
   };
 
+  // Contexte HTML autour d'une interaction — donné à l'assistant de
+  // modification pour qu'il puisse juger d'un sélecteur ou d'une demande sans
+  // avoir jamais vu la page (cf. backend/api/prompts.py). Conteneurs au-delà
+  // desquels la sérialisation grossit vite sans apporter d'information
+  // supplémentaire pour un modèle de langage — souvent le corps entier de la page.
+  const LANDMARK = 'form, section, article, table, fieldset, nav, header, main, '
+    + '[role="dialog"], [role="region"], [role="tabpanel"]';
+
+  function sanitizeClone(el) {
+    // Clone plutôt que sérialiser en direct : permet de retirer proprement
+    // scripts et gestionnaires inline sans jamais toucher la vraie page.
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('script, style').forEach((n) => n.remove());
+    // `[clone, ...]` et non `clone.querySelectorAll('*')` seul : `querySelectorAll`
+    // ne renvoie que les DESCENDANTS, jamais le nœud racine — et la racine est
+    // justement le cas le plus fréquent (le niveau 0 EST l'élément cliqué :
+    // un `onclick` dessus serait resté tel quel sans ce nœud en plus).
+    [clone, ...clone.querySelectorAll('*')].forEach((node) => {
+      // Défense en profondeur : `.outerHTML` ne reflète de toute façon jamais
+      // ce que la personne a tapé dans un champ (seul l'attribut HTML
+      // d'origine y figure), mais un mot de passe ne doit jamais apparaître
+      // même vide.
+      if (node instanceof HTMLInputElement && node.type === 'password') {
+        node.removeAttribute('value');
+      }
+      for (const attr of [...node.attributes]) {
+        if (attr.name.startsWith('on')) node.removeAttribute(attr.name);
+      }
+    });
+    return clone.outerHTML;
+  }
+
+  function truncate(html, max) {
+    return html.length > max ? html.slice(0, max) + ' …(tronqué)' : html;
+  }
+
+  /** Contexte HTML autour d'un élément, du plus étroit (l'élément lui-même) au
+   *  plus large (son container nommé) — jamais plus de 3 niveaux, pour ne pas
+   *  faire payer à chaque appel de l'assistant le HTML complet de la page.
+   *  L'assistant ne voit d'abord que le niveau 0 ; il peut demander la suite
+   *  (`need_more_context`) si ça ne suffit pas à juger. */
+  function captureContext(el) {
+    const chain = [el];
+    if (el.parentElement && el.parentElement !== document.body) {
+      chain.push(el.parentElement);
+    }
+    let landmark = el.closest(LANDMARK);
+    if (landmark === el) landmark = el.parentElement?.closest(LANDMARK) ?? null;
+    if (landmark && landmark !== document.body && !chain.includes(landmark)) {
+      chain.push(landmark);
+    }
+    const caps = [500, 2000, 6000];
+    return chain.map((node, i) => truncate(sanitizeClone(node), caps[i] ?? 6000));
+  }
+
   // Éléments qui font office de contrôle : quand le clic tombe à l'intérieur de
   // l'un d'eux (sur le <span> d'un bouton, par ex.), c'est LUI qu'on veut viser,
   // pas le nœud exact touché — son sélecteur est plus stable.
@@ -60,7 +115,10 @@ export function captureInit() {
     const target = node.closest(CONTROL) || node;
     const rect = target.getBoundingClientRect();
 
-    const step = { action: 'click', selector: computeSelector(target), text: textOf(target) };
+    const step = {
+      action: 'click', selector: computeSelector(target), text: textOf(target),
+      context: captureContext(target),
+    };
 
     // Point d'impact DANS l'élément, plus ses dimensions au moment du clic. Le
     // centre ne suffit pas partout : canevas, carte, curseur, barre de
@@ -112,10 +170,12 @@ export function captureInit() {
     if (el instanceof HTMLInputElement && el.type === 'password') {
       // Garde-fou vie privée : jamais la valeur d'un champ mot de passe. Pas
       // de déduplication ici : peu importe si l'étape masquée se répète, ce
-      // qui compte est qu'elle ne contienne jamais la valeur en clair.
+      // qui compte est qu'elle ne contienne jamais la valeur en clair. Le
+      // contexte reste capturé (l'élément lui-même est déjà purgé de sa
+      // valeur par `sanitizeClone`) : il aide l'assistant à situer le champ.
       if (lastReported.get(el) !== '***') {
         lastReported.set(el, '***');
-        send({ action: 'fill', selector, masked: true });
+        send({ action: 'fill', selector, masked: true, context: captureContext(el) });
       }
       return;
     }
@@ -124,10 +184,10 @@ export function captureInit() {
     lastReported.set(el, el.value);
 
     if (el instanceof HTMLSelectElement) {
-      send({ action: 'select', selector, value: el.value });
+      send({ action: 'select', selector, value: el.value, context: captureContext(el) });
       return;
     }
-    send({ action: 'fill', selector, value: el.value });
+    send({ action: 'fill', selector, value: el.value, context: captureContext(el) });
   };
 
   document.addEventListener('change', (event) => reportFieldValue(event.target), true);
@@ -137,6 +197,6 @@ export function captureInit() {
     if (event.key !== 'Enter') return;
     const el = event.target;
     if (!(el instanceof HTMLInputElement) || el.type === 'password') return;
-    send({ action: 'press', selector: computeSelector(el), key: 'Enter' });
+    send({ action: 'press', selector: computeSelector(el), key: 'Enter', context: captureContext(el) });
   }, true);
 }

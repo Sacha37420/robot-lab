@@ -19,21 +19,38 @@ class AIProviderConfigSerializer(serializers.ModelSerializer):
         return bool(obj.api_key)
 
 
+class LastRunSerializer(serializers.Serializer):
+    """Résumé du dernier test conservé — affiché dans l'éditeur, lu par
+    l'assistant (cf. `AssistantView._build_message`, même source de vérité)."""
+
+    status = serializers.CharField()
+    status_display = serializers.CharField(source='get_status_display')
+    created_at = serializers.DateTimeField()
+    finished_at = serializers.DateTimeField()
+    log = serializers.JSONField()
+    error_message = serializers.CharField()
+
+
 class RobotSerializer(serializers.ModelSerializer):
     # Avertissements calculés, pas stockés : ils dépendent de la combinaison
     # steps × variables, qui change à chaque modification de l'un ou l'autre.
     warnings = serializers.SerializerMethodField()
+    last_run = serializers.SerializerMethodField()
 
     class Meta:
         model = Robot
         fields = [
             'id', 'name', 'description', 'start_url', 'steps', 'variables',
-            'warnings', 'created_at', 'updated_at',
+            'warnings', 'last_run', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_warnings(self, obj) -> list:
         return loop_issues(obj.steps, obj.variables)
+
+    def get_last_run(self, obj):
+        run = obj.runs.exclude(status='running').first()
+        return LastRunSerializer(run).data if run else None
 
     def validate_steps(self, value):
         # Même validateur que pour les étapes proposées par l'IA : rien qui ne

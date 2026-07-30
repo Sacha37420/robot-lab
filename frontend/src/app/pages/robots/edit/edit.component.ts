@@ -1,8 +1,10 @@
+import { DatePipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
-  ApiService, AssistantProposal, Robot, RobotStep, StepActionSchema, StepFieldSchema,
+  ApiService, AssistantProposal, LastRun, Robot, RobotStep, RunLogLine, StepActionSchema,
+  StepFieldSchema,
 } from '../../../core/api.service';
 import { AssistantChatComponent } from '../assistant-chat/assistant-chat.component';
 
@@ -27,7 +29,7 @@ function fields(step: RobotStep): StepRecord {
 @Component({
   selector: 'app-edit',
   standalone: true,
-  imports: [FormsModule, RouterLink, AssistantChatComponent],
+  imports: [FormsModule, RouterLink, DatePipe, AssistantChatComponent],
   templateUrl: './edit.component.html',
   styleUrl: './edit.component.scss',
 })
@@ -299,5 +301,9 @@ export class EditComponent implements OnInit {
 
   valueCount(draft: VariableDraft): number {
     return draft.text.split('\n').filter((value) => value.trim().length > 0).length;
+  }
+
+  failedLines(run: LastRun): RunLogLine[] {
+    return run.log.filter((line) => line.state === 'failed');
   }
 }

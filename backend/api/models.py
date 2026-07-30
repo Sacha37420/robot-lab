@@ -67,14 +67,33 @@ def _generate_token() -> str:
     return secrets.token_hex(32)
 
 
+RUN_STATUS_CHOICES = [
+    ('running', 'En cours'),
+    ('success', 'Réussi'),
+    ('failed', 'Échoué'),
+    ('error', 'Erreur'),
+    ('stopped', 'Arrêté manuellement'),
+]
+
+
 class RobotRun(models.Model):
-    """Une exécution du robot — porte l'autorisation des fichiers téléchargés.
+    """Une exécution du robot — porte l'autorisation des fichiers téléchargés,
+    et conserve le résultat une fois terminée.
 
     `engine/` écrit les téléchargements dans un dossier nommé d'après l'id de ce
     run ; Django, qui seul connaît le lien run → robot → propriétaire, sert puis
     supprime ces fichiers. C'est ce qui permet à `engine/` de rester **sans aucun
     droit d'écriture en base** (propriété posée au Lot 2) tout en produisant des
     fichiers dont l'accès reste correctement cloisonné.
+
+    Pour la même raison, `engine/` ne peut pas non plus consigner lui-même le
+    résultat de l'exécution : c'est le frontend, qui porte le vrai jeton de la
+    personne, qui le fait via `POST .../result/` une fois la session WebSocket
+    terminée — `status`/`log`/`error_message` restent donc vides tant que
+    l'exécution est en cours, et prennent leur valeur définitive à ce moment-là.
+    Sans ça, un « test » ne laissait aucune trace consultable après coup, et
+    l'assistant de modification ne pouvait jamais savoir si le parcours avait
+    déjà été essayé — ce que ce champ referme.
     """
 
     robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name='runs')
@@ -82,7 +101,14 @@ class RobotRun(models.Model):
     # Fournisseur qui pilotera les étapes « tâche IA » de cette exécution.
     # Choisi au lancement : c'est la clé de cet utilisateur qui sera facturée.
     ai_provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, blank=True)
+    status = models.CharField(max_length=10, choices=RUN_STATUS_CHOICES, default='running')
+    # Une ligne par étape effectivement jouée : [{index, label, state, note}].
+    # `state` ∈ {'done', 'failed'} — jamais 'running', ce champ n'est écrit
+    # qu'une fois l'exécution terminée.
+    log = models.JSONField(default=list, blank=True)
+    error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'robot_runs'

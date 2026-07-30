@@ -2,6 +2,11 @@
   <div class="page-head">
     <h2>Modifier — {{ robot()?.name || '…' }}</h2>
     <div class="head-actions">
+      @if (robot()?.steps?.length) {
+        <a [routerLink]="['/robots', robotId, 'lancer']" class="btn-primary">
+          Lancer un test
+        </a>
+      }
       <a [routerLink]="['/robots', robotId, 'enregistrer']" class="btn-secondary">
         Réenregistrer le parcours
       </a>
@@ -29,6 +34,25 @@
                 <li>{{ warning }}</li>
               }
             </ul>
+          </div>
+        }
+
+        @if (robot()?.last_run; as run) {
+          <div class="last-run" [class.last-run-bad]="run.status !== 'success'">
+            <div class="last-run-head">
+              <strong>Dernier test — {{ run.status_display }}</strong>
+              <span class="last-run-date">{{ run.finished_at | date:'dd/MM/yyyy HH:mm' }}</span>
+            </div>
+            @if (failedLines(run).length > 0) {
+              <ul>
+                @for (line of failedLines(run); track line.index) {
+                  <li>Étape {{ line.index }} — {{ line.label }}{{ line.note ? ' : ' + line.note : '' }}</li>
+                }
+              </ul>
+            }
+            @if (run.error_message) {
+              <p class="last-run-message">{{ run.error_message }}</p>
+            }
           </div>
         }
 
