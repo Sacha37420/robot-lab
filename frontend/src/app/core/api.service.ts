@@ -56,6 +56,9 @@ export interface Robot {
   start_url: string;
   steps: RobotStep[];
   variables: RobotVariables;
+  /** Calculé par le serveur : ce qui empêcherait le robot de faire son travail
+   *  (boucle sans valeur…). Vide quand tout va bien. */
+  warnings: string[];
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +67,7 @@ export interface AssistantProposal {
   steps: RobotStep[];
   variables: RobotVariables;
   explanation: string;
+  warnings: string[];
 }
 
 export type RobotInput = Pick<Robot, 'name' | 'description' | 'start_url'>;
@@ -126,6 +130,12 @@ export class ApiService {
       `${this.base}/api/runs/${runId}/downloads/${encodeURIComponent(name)}/`,
       { responseType: 'blob' },
     );
+  }
+
+  /** Valeurs des variables sur lesquelles boucler — modifiables sans repasser
+   *  par l'assistant, qui ne peut pas les deviner. */
+  updateRobotVariables(id: number, variables: RobotVariables): Observable<Robot> {
+    return this.http.patch<Robot>(`${this.base}/api/robots/${id}/`, { variables });
   }
 
   updateRobotSteps(id: number, steps: RobotStep[], variables?: RobotVariables): Observable<Robot> {

@@ -8,6 +8,51 @@
     <p class="status">Chargement…</p>
   } @else {
 
+    @if (robot()?.warnings?.length) {
+      <section class="card warnings">
+        <h3>⚠ Ce robot ne ferait pas ce que vous attendez</h3>
+        <ul>
+          @for (warning of robot()!.warnings; track warning) {
+            <li>{{ warning }}</li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (variableDrafts.length > 0) {
+      <section class="card variables-editor">
+        <h3>Valeurs des variables</h3>
+        <p class="intro">
+          Une valeur par ligne. Le robot répète les étapes de la boucle une fois par
+          valeur. L'assistant ne peut pas les deviner — c'est à vous de les saisir.
+        </p>
+
+        @for (draft of variableDrafts; track draft.name) {
+          <label class="field">
+            <span>{{ draft.name }} — {{ valueCount(draft) }} valeur(s)</span>
+            <textarea
+              rows="5"
+              [(ngModel)]="draft.text"
+              placeholder="ex.&#10;15/07/2026&#10;16/07/2026&#10;17/07/2026"
+            ></textarea>
+          </label>
+        }
+
+        @if (variablesSaved()) {
+          <p class="saved">Valeurs enregistrées.</p>
+        }
+
+        <button
+          type="button"
+          class="btn-primary"
+          [disabled]="savingVariables()"
+          (click)="saveVariables()"
+        >
+          {{ savingVariables() ? 'Enregistrement…' : 'Enregistrer les valeurs' }}
+        </button>
+      </section>
+    }
+
     <section class="card">
       <p class="intro">
         Décrivez en français ce que vous voulez changer. L'assistant propose une nouvelle
@@ -75,7 +120,22 @@
           <h4>Variables</h4>
           <ul class="variables">
             @for (entry of variableEntries(p.variables); track entry.name) {
-              <li><strong>{{ entry.name }}</strong> : {{ entry.values.join(', ') }}</li>
+              <li>
+                <strong>{{ entry.name }}</strong> :
+                @if (entry.values.length) {
+                  {{ entry.values.join(', ') }}
+                } @else {
+                  <em>aucune valeur — à saisir après acceptation</em>
+                }
+              </li>
+            }
+          </ul>
+        }
+
+        @if (p.warnings?.length) {
+          <ul class="proposal-warnings">
+            @for (warning of p.warnings; track warning) {
+              <li>⚠ {{ warning }}</li>
             }
           </ul>
         }

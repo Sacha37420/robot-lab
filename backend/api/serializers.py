@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .models import AIProviderConfig, Robot
-from .steps import StepError, validate_steps
+from .steps import StepError, loop_issues, validate_steps
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -20,13 +20,20 @@ class AIProviderConfigSerializer(serializers.ModelSerializer):
 
 
 class RobotSerializer(serializers.ModelSerializer):
+    # Avertissements calculés, pas stockés : ils dépendent de la combinaison
+    # steps × variables, qui change à chaque modification de l'un ou l'autre.
+    warnings = serializers.SerializerMethodField()
+
     class Meta:
         model = Robot
         fields = [
             'id', 'name', 'description', 'start_url', 'steps', 'variables',
-            'created_at', 'updated_at',
+            'warnings', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_warnings(self, obj) -> list:
+        return loop_issues(obj.steps, obj.variables)
 
     def validate_steps(self, value):
         # Même validateur que pour les étapes proposées par l'IA : rien qui ne

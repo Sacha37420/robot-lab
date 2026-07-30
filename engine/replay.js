@@ -33,6 +33,16 @@ export function expand(steps, variables) {
         }
         const body = slice.slice(i + 1, end - 1);
         const values = step.values?.length ? step.values : (variables?.[step.variable] ?? []);
+        // Une boucle sans valeur ne doit JAMAIS être sautée en silence : le robot
+        // se terminait en succès après avoir ignoré tout le corps de boucle, sans
+        // rien signaler (vécu en réel — 9 étapes exécutées sur 15, run « réussi »).
+        // On échoue franchement, avec le nom de la variable à renseigner.
+        if (!values.length) {
+          throw new Error(
+            `La boucle sur « ${step.variable} » n'a aucune valeur : rien à répéter. `
+            + `Renseignez les valeurs de « ${step.variable} » avant de lancer le robot.`,
+          );
+        }
         for (const value of values) {
           walk(body, { ...bindings, [step.variable]: value });
           if (out.length > MAX_EXPANDED_STEPS) {

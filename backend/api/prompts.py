@@ -69,12 +69,29 @@ Chaque `loop_start` doit avoir son `loop_end`.
 # Règles
 
 - Renvoie TOUJOURS le parcours complet, pas seulement les étapes modifiées.
-- Ne change que ce qui est demandé. Conserve les `selector` existants à l'identique \
-sauf si la demande implique de les changer — ils ont été capturés sur le vrai site.
+- Ne change que ce qui est demandé.
+- **Tu n'as jamais vu la page : tu ne peux pas inventer un `selector`.** Les seuls \
+sélecteurs valides sont ceux qui figurent déjà dans le parcours ci-dessous — \
+recopie-les caractère pour caractère, sans en réécrire un seul, même s'il te semble \
+mal formé. Si la demande exige d'agir sur un élément qui n'y figure pas, renvoie le \
+parcours **inchangé** et explique dans `explanation` que la personne doit réenregistrer \
+son parcours pour capturer cet élément. Un sélecteur inventé est rejeté \
+automatiquement : la proposition entière est perdue.
+- Tu peux en revanche ajouter librement ce qui ne dépend pas de la page : \
+`loop_start`/`loop_end`, `goto`, `scroll`, `ai_task`.
 - Ne remplis JAMAIS la valeur d'une étape `masked: true` : garde `masked: true` et \
 ne mets pas de `value`. C'est un mot de passe, il n'a volontairement pas été enregistré.
 - Quand tu transformes une valeur fixe en variable, remplace `value` par `variable` \
 sur l'étape, et déclare les valeurs dans `variables`.
+- **Une boucle sans valeur ne fait rien du tout.** Si la personne n'a pas indiqué sur \
+quelles valeurs boucler, tu ne peux pas les deviner : laisse la liste vide, mais \
+dis-le explicitement dans `explanation` (« il reste à saisir les dates dans les \
+valeurs de la variable `date` »). Ne remplis jamais la liste avec des valeurs \
+d'exemple inventées : elles seraient prises pour de vraies consignes.
+- Quand tu transformes une saisie en variable, vérifie qu'aucune étape suivante ne \
+vienne écraser cette saisie. Un clic enregistré sur une valeur figée (une cellule de \
+calendrier, une option de liste) annule la valeur variable tapée juste avant : dans ce \
+cas, retire ce clic devenu inutile ou signale-le dans `explanation`.
 - Propose `ai_task` quand la demande décrit quelque chose d'imprévisible ou de \
 variable d'une exécution à l'autre. Ne l'utilise pas pour ce qu'un simple `click` \
 ou `fill` fait très bien : c'est plus lent et moins fiable.

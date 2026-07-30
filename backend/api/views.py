@@ -15,7 +15,7 @@ from .ai_pilot import MAX_ITERATIONS, PilotError, next_action
 from .downloads import list_downloads, resolve_download
 from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun
 from .serializers import AIProviderConfigSerializer, RobotSerializer
-from .steps import StepError, validate_steps
+from .steps import StepError, invented_selectors, loop_issues, validate_steps
 
 _VALID_PROVIDERS = {key for key, _ in PROVIDER_CHOICES}
 
@@ -302,6 +302,23 @@ class AssistantView(APIView):
                 {'detail': f'La proposition de l\'IA est invalide : {exc}'}, status=502,
             )
 
+        # Un sélecteur inédit ne peut pas venir d'une observation : le modèle ne
+        # voit jamais la page. La proposition entière est refusée plutôt que de
+        # laisser relire un sélecteur inventé à quelqu'un qui, par hypothèse, ne
+        # sait pas lire du code — la relecture humaine ne peut pas jouer son rôle
+        # de garde-fou sur ce champ-là. L'assistant garde toute latitude sur ce
+        # qui ne dépend pas du DOM : boucles, variables, tâches IA, navigations.
+        invented = invented_selectors(robot.steps, steps)
+        if invented:
+            details = ' ; '.join(f'étape {i} → {sel}' for i, sel in invented)
+            return Response({'detail': (
+                "L'assistant a inventé des sélecteurs, ce qu'il ne peut pas faire de "
+                'façon fiable : il ne connaît que les éléments déjà enregistrés dans le '
+                f'parcours ({details}). Reformulez la demande en vous appuyant sur les '
+                'étapes existantes, ou réenregistrez le parcours pour capturer le '
+                'nouvel élément.'
+            )}, status=502)
+
         variables = result.get('variables')
         if not isinstance(variables, dict):
             variables = {}
@@ -310,4 +327,7 @@ class AssistantView(APIView):
             'steps': steps,
             'variables': variables,
             'explanation': (result.get('explanation') or '').strip(),
+            # Signalés avant l'acceptation : une boucle proposée sans valeur ne
+            # ferait rien du tout une fois enregistrée.
+            'warnings': loop_issues(steps, variables),
         })

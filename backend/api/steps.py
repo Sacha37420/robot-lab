@@ -130,3 +130,69 @@ def validate_steps(steps):
         raise StepError(f'{depth} boucle(s) ouverte(s) sans loop_end.')
 
     return steps
+
+
+def loop_issues(steps, variables=None):
+    """Ce qui rendrait une boucle inopérante — messages prêts à afficher.
+
+    Volontairement **séparé de `validate_steps`** : ce ne sont pas des étapes
+    invalides, et ça ne doit pas empêcher l'enregistrement. Une boucle sans
+    valeur est l'état normal juste après une proposition de l'IA, qui ne peut pas
+    inventer les valeurs à la place de la personne ; refuser le PATCH
+    l'empêcherait d'atteindre l'éditeur de variables qui sert justement à les
+    saisir. C'est donc un avertissement ici, et une erreur franche au rejeu
+    (`expand()` dans engine/replay.js) — jamais un saut silencieux.
+    """
+    variables = variables or {}
+    issues = []
+    open_loops = []  # variables des boucles ouvertes à ce point du parcours
+
+    for index, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            continue
+        action = step.get('action')
+
+        if action == 'loop_start':
+            name = step.get('variable')
+            open_loops.append(name)
+            if not (step.get('values') or variables.get(name)):
+                issues.append(
+                    f"Étape {index} : la boucle sur « {name} » n'a aucune valeur, "
+                    f"elle serait entièrement sautée. Renseignez les valeurs de "
+                    f"« {name} » pour qu'elle s'exécute."
+                )
+        elif action == 'loop_end':
+            if open_loops:
+                open_loops.pop()
+        elif step.get('variable') and step['variable'] not in open_loops:
+            # Même famille de panne silencieuse : au rejeu, l'étape ne reçoit
+            # aucune valeur puisque aucune boucle ne lie cette variable.
+            issues.append(
+                f"Étape {index} : utilise la variable « {step['variable']} » alors "
+                f"qu'aucune boucle ouverte ne lui donne de valeur."
+            )
+
+    return issues
+
+
+def invented_selectors(previous_steps, proposed_steps):
+    """Sélecteurs de `proposed_steps` absents de `previous_steps` → [(index, sélecteur)].
+
+    Un modèle de langage ne voit jamais la page : il ne peut connaître un
+    sélecteur que parce qu'il figure déjà dans le parcours enregistré. Tout
+    sélecteur inédit est donc une invention, quelle que soit sa plausibilité.
+    Vécu en réel : `tbody > tr:nth-of-type(3) > tr:nth-of-type(3) > td... > a`,
+    un `tr` enfant de `tr` — structure qu'aucun DOM ne produit, donc zéro
+    correspondance et un timeout au rejeu.
+    """
+    known = {
+        step['selector']
+        for step in previous_steps or []
+        if isinstance(step, dict) and step.get('selector')
+    }
+    return [
+        (index, step['selector'])
+        for index, step in enumerate(proposed_steps or [], 1)
+        if isinstance(step, dict) and step.get('selector')
+        and step['selector'] not in known
+    ]

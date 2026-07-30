@@ -13,6 +13,12 @@ interface DiffRow {
   status: 'unchanged' | 'changed' | 'added' | 'removed';
 }
 
+/** Une variable en cours d'édition — valeurs saisies une par ligne. */
+interface VariableDraft {
+  name: string;
+  text: string;
+}
+
 @Component({
   selector: 'app-assistant',
   standalone: true,
@@ -38,14 +44,68 @@ export class AssistantComponent implements OnInit {
   applying = signal(false);
   applied = signal(false);
 
+  /** Champ mutable (lié par ngModel), pas un signal : c'est le formulaire lui-même. */
+  variableDrafts: VariableDraft[] = [];
+  savingVariables = signal(false);
+  variablesSaved = signal(false);
+
   ngOnInit(): void {
     this.api.getRobot(this.robotId).subscribe({
-      next: (robot) => { this.robot.set(robot); this.loading.set(false); },
+      next: (robot) => { this.load(robot); this.loading.set(false); },
       error: () => {
         this.loading.set(false);
         this.error.set('Impossible de charger ce robot.');
       },
     });
+  }
+
+  private load(robot: Robot): void {
+    this.robot.set(robot);
+    // Toute variable sur laquelle une boucle porte doit être éditable, même
+    // quand elle n'a encore aucune valeur — c'est précisément le cas à réparer.
+    const names = new Set<string>();
+    for (const step of robot.steps ?? []) {
+      if (step.action === 'loop_start' && step.variable) names.add(step.variable);
+    }
+    for (const name of Object.keys(robot.variables ?? {})) names.add(name);
+
+    this.variableDrafts = [...names].map((name) => ({
+      name,
+      text: (robot.variables?.[name] ?? []).join('\n'),
+    }));
+  }
+
+  saveVariables(): void {
+    const variables: Record<string, string[]> = {};
+    for (const draft of this.variableDrafts) {
+      // Une ligne = une valeur ; les lignes vides ne sont pas des valeurs.
+      variables[draft.name] = draft.text
+        .split('\n')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+    }
+
+    this.savingVariables.set(true);
+    this.error.set(null);
+    this.variablesSaved.set(false);
+
+    this.api.updateRobotVariables(this.robotId, variables).subscribe({
+      next: (robot) => {
+        this.load(robot);
+        this.savingVariables.set(false);
+        this.variablesSaved.set(true);
+      },
+      error: (err) => {
+        this.savingVariables.set(false);
+        this.error.set(
+          err?.error?.variables?.[0] ?? "Les valeurs n'ont pas pu être enregistrées.",
+        );
+      },
+    });
+  }
+
+  valueCount(draft: VariableDraft): number {
+    return draft.text.split('\n').filter((value) => value.trim().length > 0).length;
   }
 
   ask(): void {
@@ -72,7 +132,7 @@ export class AssistantComponent implements OnInit {
 
     this.api.updateRobotSteps(this.robotId, proposal.steps, proposal.variables).subscribe({
       next: (robot) => {
-        this.robot.set(robot);
+        this.load(robot);
         this.proposal.set(null);
         this.applying.set(false);
         this.applied.set(true);
