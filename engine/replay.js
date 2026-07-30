@@ -15,6 +15,20 @@ const SELECT_STRICT_TIMEOUT_MS = 5000;
 // d'exécution illimité. Vécu ailleurs dans le lab (cf. MAX_PAGES de restauration).
 const MAX_EXPANDED_STEPS = 2000;
 
+const VARIABLE_PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+
+/** Remplace `{{nom}}` par la valeur liée dans `bindings`, s'il y en a une.
+ *  Un placeholder sans boucle englobante correspondante est laissé tel quel —
+ *  visible dans le journal d'exécution, ce qui vaut mieux qu'une disparition
+ *  silencieuse (même choix que pour un `variable` orphelin sur `fill`/`select`,
+ *  cf. `loop_issues()` côté backend, qui détecte ce même cas ici).
+ */
+function substitutePlaceholders(text, bindings) {
+  return text.replace(VARIABLE_PLACEHOLDER, (match, name) => (
+    bindings[name] !== undefined ? bindings[name] : match
+  ));
+}
+
 /** Déplie les boucles en une liste plate d'étapes à exécuter, variables résolues. */
 export function expand(steps, variables) {
   const out = [];
@@ -61,6 +75,18 @@ export function expand(steps, variables) {
       const resolved = { ...step };
       if (step.variable && bindings[step.variable] !== undefined) {
         resolved.value = bindings[step.variable];
+      }
+      // `ai_task` n'a pas de champ `variable` (son texte est libre, pas une
+      // valeur unique) : une variable de boucle s'y insère par `{{nom}}` dans
+      // `objective`/`expected_result`, résolu ici avec les mêmes `bindings`
+      // que `fill`/`select` — sans ça, une boucle autour d'un `ai_task` ne
+      // pouvait faire varier ni son objectif ni son critère de réussite d'un
+      // tour à l'autre.
+      if (step.action === 'ai_task') {
+        if (resolved.objective) resolved.objective = substitutePlaceholders(resolved.objective, bindings);
+        if (resolved.expected_result) {
+          resolved.expected_result = substitutePlaceholders(resolved.expected_result, bindings);
+        }
       }
       out.push(resolved);
     }

@@ -8,6 +8,14 @@ fait ici, pas en dupliquant la liste dans les prompts.
 sorties structurées des API LLM ne supportent pas les schémas récursifs, et une
 liste plate se rejoue avec une simple pile côté moteur.
 """
+import re
+
+# `ai_task` n'a pas de champ `variable` : son texte est libre, pas une valeur
+# unique. Une variable de boucle s'y insère par `{{nom}}` dans `objective`/
+# `expected_result`, résolu par `engine/replay.js::expand()` avec les mêmes
+# `bindings` que `fill`/`select`. Même expression ici pour que `loop_issues()`
+# détecte un placeholder orphelin (aucune boucle englobante ne le lie).
+VARIABLE_PLACEHOLDER = re.compile(r'\{\{\s*([a-zA-Z0-9_]+)\s*\}\}')
 
 # Étapes qui ciblent un élément précis : seules celles-là portent un `context`
 # (HTML capturé autour de l'élément à l'enregistrement — cf. `CONTEXT_LEVELS`
@@ -289,6 +297,18 @@ def loop_issues(steps, variables=None):
                 f"Étape {index} : utilise la variable « {step['variable']} » alors "
                 f"qu'aucune boucle ouverte ne lui donne de valeur."
             )
+        elif action == 'ai_task':
+            # Un `{{nom}}` dans le texte d'une tâche IA suit la même règle
+            # qu'un `variable` orphelin : sans boucle englobante sur ce nom,
+            # `expand()` le laisse tel quel — l'IA recevrait littéralement
+            # « {{commune}} » comme objectif au lieu de la valeur attendue.
+            text = f"{step.get('objective', '')} {step.get('expected_result', '')}"
+            for name in VARIABLE_PLACEHOLDER.findall(text):
+                if name not in open_loops:
+                    issues.append(
+                        f"Étape {index} : référence « {{{{{name}}}}} » alors qu'aucune "
+                        f"boucle ouverte ne lie cette variable."
+                    )
 
     return issues
 

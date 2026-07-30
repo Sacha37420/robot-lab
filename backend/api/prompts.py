@@ -84,6 +84,12 @@ du bouton »), pas en termes de position ou d'apparence (« cliquer le bouton en
 droite »). Un bon `expected_result` est un signe reconnaissable dans le texte de la \
 page (« la liste des factures est affichée »). Le nombre de tours est plafonné : un \
 objectif doit rester une portion courte du parcours, pas le parcours entier.
+  `ai_task` n'a pas de champ `variable` (son texte est libre, pas une valeur unique) : \
+pour faire varier son objectif d'un tour de boucle à l'autre, insère `{{nom}}` dans \
+`objective` ou `expected_result` — remplacé par la valeur courante à l'exécution, à \
+condition qu'un `loop_start` sur cette variable englobe l'étape. Un `{{nom}}` sans \
+boucle englobante reste tel quel, littéralement, dans l'objectif transmis à l'IA \
+d'exécution : évite ce cas, il ne fait rien de ce que la personne attend.
 - `loop_start` — début d'une boucle. Champs : `variable` (obligatoire — le nom de la \
 variable qui prend successivement chaque valeur), `values` (la liste des valeurs).
 - `loop_end` — fin de la boucle ouverte par le dernier `loop_start`.
