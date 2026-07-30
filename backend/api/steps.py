@@ -48,6 +48,89 @@ REQUIRED_FIELDS = {
 
 ACTIONS = tuple(STEP_SCHEMA)
 
+# Comment chaque champ se saisit, et sous quel libellé. Vit ici et pas en
+# TypeScript : l'éditeur manuel du frontend lit ce vocabulaire par l'API
+# (`GET /api/step-schema/`) au lieu d'en tenir une copie qui dériverait au
+# premier ajout d'action — même raison que pour les prompts (cf. en-tête).
+FIELD_TYPES = {
+    'url':             'string',
+    'selector':        'string',
+    'text':            'string',
+    'value':           'string',
+    'variable':        'string',
+    'key':             'string',
+    'kind':            'string',
+    'message':         'string',
+    'objective':       'multiline',
+    'expected_result': 'multiline',
+    'masked':          'boolean',
+    'accept':          'boolean',
+    'x':               'number',
+    'y':               'number',
+    'values':          'string-list',
+    'position':        'position',
+}
+
+FIELD_LABELS = {
+    'url':             "Adresse à ouvrir",
+    'selector':        "Élément ciblé (capturé à l'enregistrement)",
+    'text':            'Libellé vu à l\'écran',
+    'value':           'Valeur fixe',
+    'variable':        'Variable (boucler dessus)',
+    'key':             'Touche',
+    'kind':            'Type de boîte',
+    'message':         'Texte de la boîte',
+    'objective':       "Objectif confié à l'IA",
+    'expected_result': "À quoi on reconnaît que c'est fait",
+    'masked':          'Mot de passe (valeur non enregistrée)',
+    'accept':          'Accepter (OK) plutôt que refuser (Annuler)',
+    'x':               'Défilement horizontal (px)',
+    'y':               'Défilement vertical (px)',
+    'values':          'Valeurs à parcourir',
+    'position':        "Point d'impact du clic",
+}
+
+ACTION_LABELS = {
+    'goto':       'Ouvrir une adresse',
+    'click':      'Cliquer un élément',
+    'fill':       'Remplir un champ',
+    'select':     'Choisir dans une liste',
+    'press':      'Appuyer sur une touche',
+    'scroll':     'Faire défiler la page',
+    'dialog':     'Répondre à une boîte de dialogue',
+    'ai_task':    "Confier une portion à l'IA",
+    'loop_start': 'Début de boucle',
+    'loop_end':   'Fin de boucle',
+}
+
+# Actions que l'éditeur manuel propose d'ajouter. Les autres portent un
+# `selector` capturé sur le vrai site : les créer à la main revient à inventer
+# un sélecteur, exactement ce que `invented_selectors()` refuse à l'IA.
+ADDABLE_ACTIONS = ('goto', 'scroll', 'ai_task', 'loop_start', 'loop_end', 'dialog')
+
+
+def schema_payload():
+    """Vocabulaire d'étapes sous forme sérialisable, pour l'éditeur manuel."""
+    return {
+        'actions': [
+            {
+                'action': action,
+                'label': ACTION_LABELS[action],
+                'addable': action in ADDABLE_ACTIONS,
+                'fields': [
+                    {
+                        'name': name,
+                        'label': FIELD_LABELS[name],
+                        'type': FIELD_TYPES[name],
+                        'required': name in REQUIRED_FIELDS[action],
+                    }
+                    for name in sorted(STEP_SCHEMA[action])
+                ],
+            }
+            for action in ACTIONS
+        ],
+    }
+
 
 class StepError(ValueError):
     """Étape refusée — message destiné à être renvoyé tel quel à l'utilisateur."""

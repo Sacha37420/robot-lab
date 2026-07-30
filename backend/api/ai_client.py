@@ -50,7 +50,7 @@ def _is_transient(exc):
     return any(code in text for code in ('429', '500', '502', '503', '504', 'timeout', 'Timeout'))
 
 
-def _call_claude(api_key, model, system, message, schema):
+def _call_claude(api_key, model, system, message, schema, history):
     import anthropic  # import tardif : dépendance lourde, inutile hors assistant
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -58,7 +58,7 @@ def _call_claude(api_key, model, system, message, schema):
         model=model,
         max_tokens=MAX_TOKENS,
         system=system,
-        messages=[{'role': 'user', 'content': message}],
+        messages=[*history, {'role': 'user', 'content': message}],
         output_config={'format': {'type': 'json_schema', 'schema': schema}},
     )
 
@@ -90,7 +90,7 @@ def _mistral_class():
     return Mistral
 
 
-def _call_mistral(api_key, model, system, message, schema):
+def _call_mistral(api_key, model, system, message, schema, history):
     Mistral = _mistral_class()  # import tardif : dépendance lourde
 
     client = Mistral(api_key=api_key)
@@ -101,6 +101,7 @@ def _call_mistral(api_key, model, system, message, schema):
             # décrit dans le prompt, et `json_object` garantit au moins du JSON.
             {'role': 'system', 'content': f'{system}\n\nRéponds en JSON respectant ce schéma :\n'
                                           f'{json.dumps(schema, ensure_ascii=False)}'},
+            *history,
             {'role': 'user', 'content': message},
         ],
         response_format={'type': 'json_object'},
@@ -112,16 +113,22 @@ def _call_mistral(api_key, model, system, message, schema):
 _CALLERS = {'claude': _call_claude, 'mistral': _call_mistral}
 
 
-def complete_json(owner_email, provider, system, message, schema):
-    """Appelle le fournisseur et renvoie la réponse JSON désérialisée."""
+def complete_json(owner_email, provider, system, message, schema, history=None):
+    """Appelle le fournisseur et renvoie la réponse JSON désérialisée.
+
+    `history` : tours précédents de la conversation ([{role, content}]), pour que
+    l'assistant de modification tienne un fil et non une succession de demandes
+    sans mémoire. Toujours borné et validé par l'appelant — il vient du client.
+    """
     config = _config(owner_email, provider)
     model = config.model_name.strip() or DEFAULT_MODELS[provider]
     caller = _CALLERS[provider]
+    history = history or []
 
     last_error = None
     for delay in RETRY_DELAYS + [None]:
         try:
-            raw = caller(config.api_key, model, system, message, schema)
+            raw = caller(config.api_key, model, system, message, schema, history)
             break
         except AIError:
             raise

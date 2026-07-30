@@ -70,6 +70,31 @@ export interface AssistantProposal {
   warnings: string[];
 }
 
+/** Un tour de conversation renvoyé à l'assistant pour qu'il garde le fil.
+ *  Reconstruit côté client à chaque appel — rien n'est stocké en base. */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Vocabulaire d'étapes servi par le backend (`GET /api/step-schema/`) : le
+ *  frontend n'en tient pas de copie, elle dériverait. */
+export interface StepFieldSchema {
+  name: string;
+  label: string;
+  type: 'string' | 'multiline' | 'boolean' | 'number' | 'string-list' | 'position';
+  required: boolean;
+}
+
+export interface StepActionSchema {
+  action: string;
+  label: string;
+  /** Faux pour les actions qui portent un `selector` capturé sur le vrai site :
+   *  les créer à la main revient à inventer un sélecteur. */
+  addable: boolean;
+  fields: StepFieldSchema[];
+}
+
 export type RobotInput = Pick<Robot, 'name' | 'description' | 'start_url'>;
 
 @Injectable({ providedIn: 'root' })
@@ -144,9 +169,15 @@ export class ApiService {
     return this.http.patch<Robot>(`${this.base}/api/robots/${id}/`, payload);
   }
 
-  askAssistant(id: number, instruction: string, provider: AIProvider): Observable<AssistantProposal> {
+  getStepSchema(): Observable<{ actions: StepActionSchema[] }> {
+    return this.http.get<{ actions: StepActionSchema[] }>(`${this.base}/api/step-schema/`);
+  }
+
+  askAssistant(
+    id: number, instruction: string, provider: AIProvider, history: ChatTurn[] = [],
+  ): Observable<AssistantProposal> {
     return this.http.post<AssistantProposal>(
-      `${this.base}/api/robots/${id}/assistant/`, { instruction, provider },
+      `${this.base}/api/robots/${id}/assistant/`, { instruction, provider, history },
     );
   }
 }

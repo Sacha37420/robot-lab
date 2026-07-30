@@ -1,0 +1,84 @@
+<aside class="chat">
+  <header class="chat-head">
+    <h3>Assistant</h3>
+    @if (messages().length > 0) {
+      <button type="button" class="link-btn" (click)="clear()">Effacer le fil</button>
+    }
+  </header>
+
+  <div class="chat-log">
+    @if (messages().length === 0) {
+      <div class="chat-intro">
+        <p>
+          Décrivez ce que vous voulez changer. L'assistant propose une nouvelle version
+          du parcours ; elle est chargée dans l'éditeur, et <strong>rien n'est enregistré
+          tant que vous n'avez pas cliqué sur « Enregistrer »</strong>.
+        </p>
+        <p class="chat-limits">
+          Il ne voit pas la page, seulement le parcours et les libellés relevés à
+          l'enregistrement. Il ne peut pas lancer le robot ni consulter les résultats
+          d'une exécution.
+        </p>
+      </div>
+    }
+
+    @for (message of messages(); track $index) {
+      <div class="msg" [class]="'msg-' + message.role" [class.msg-failed]="message.failed">
+        <p class="msg-text">{{ message.content }}</p>
+
+        @if (message.proposal; as p) {
+          @if (p.warnings?.length) {
+            <ul class="msg-warnings">
+              @for (warning of p.warnings; track warning) {
+                <li>⚠ {{ warning }}</li>
+              }
+            </ul>
+          }
+
+          <div class="msg-actions">
+            <span class="msg-meta">{{ p.steps.length }} étape(s) proposée(s)</span>
+            @if (message.applied) {
+              <span class="msg-applied">Chargée dans l'éditeur</span>
+            } @else {
+              <button type="button" class="btn-primary btn-sm" (click)="applyProposal(message)">
+                Charger dans l'éditeur
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    @if (asking()) {
+      <div class="msg msg-assistant msg-pending">
+        <p class="msg-text">L'assistant réfléchit…</p>
+      </div>
+    }
+  </div>
+
+  <div class="chat-compose">
+    <label class="field-inline">
+      <span>Fournisseur</span>
+      <select [(ngModel)]="provider">
+        <option value="claude">Claude</option>
+        <option value="mistral">Mistral</option>
+      </select>
+    </label>
+
+    <textarea
+      rows="3"
+      [(ngModel)]="instruction"
+      (keydown.control.enter)="send()"
+      placeholder="ex. transforme la date en variable pour boucler sur plusieurs dates"
+    ></textarea>
+
+    <button
+      type="button"
+      class="btn-primary"
+      [disabled]="asking() || !instruction.trim()"
+      (click)="send()"
+    >
+      {{ asking() ? 'Envoi…' : 'Envoyer' }}
+    </button>
+  </div>
+</aside>

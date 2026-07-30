@@ -1,0 +1,233 @@
+<main class="page-edit">
+  <div class="page-head">
+    <h2>Modifier — {{ robot()?.name || '…' }}</h2>
+    <div class="head-actions">
+      <a [routerLink]="['/robots', robotId, 'enregistrer']" class="btn-secondary">
+        Réenregistrer le parcours
+      </a>
+      <a routerLink="/robots" class="btn-secondary">← Retour</a>
+    </div>
+  </div>
+
+  @if (loading()) {
+    <p class="status">Chargement…</p>
+  } @else {
+    <div class="split">
+
+      <!-- ── Fenêtre principale : éditeur manuel ──────────────────────── -->
+      <section class="editor">
+
+        @if (error()) {
+          <p class="error">{{ error() }}</p>
+        }
+
+        @if (robot()?.warnings?.length) {
+          <div class="warnings">
+            <strong>⚠ En l'état enregistré, ce robot ne ferait pas ce que vous attendez</strong>
+            <ul>
+              @for (warning of robot()!.warnings; track warning) {
+                <li>{{ warning }}</li>
+              }
+            </ul>
+          </div>
+        }
+
+        <div class="toolbar">
+          <span class="toolbar-title">
+            Parcours — {{ steps.length }} étape(s)
+            @if (fromAssistant()) {
+              <em class="from-ai">proposition de l'assistant, non enregistrée</em>
+            } @else if (dirty()) {
+              <em class="unsaved">modifications non enregistrées</em>
+            }
+          </span>
+
+          <div class="toolbar-actions">
+            @if (saved()) {
+              <span class="saved">Enregistré.</span>
+            }
+            @if (dirty()) {
+              <button type="button" class="btn-secondary" (click)="revert()">Annuler</button>
+            }
+            <button
+              type="button"
+              class="btn-primary"
+              [disabled]="saving() || !dirty()"
+              (click)="save()"
+            >
+              {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+          </div>
+        </div>
+
+        @if (steps.length === 0) {
+          <p class="status">
+            Aucune étape. Enregistrez d'abord un parcours, ou ajoutez une étape ci-dessous.
+          </p>
+        }
+
+        <ol class="steps">
+          @for (step of steps; track $index) {
+            <li class="step" [class.step-open]="openIndex() === $index">
+              <div class="step-row" [style.padding-left.px]="12 + depthOf($index) * 18">
+                <button type="button" class="step-main" (click)="toggle($index)">
+                  <span class="step-num">{{ $index + 1 }}</span>
+                  <span class="step-kind">{{ actionLabel(step.action) }}</span>
+                  <span class="step-summary">{{ summary(step) }}</span>
+                </button>
+
+                <div class="step-tools">
+                  <button
+                    type="button" class="icon-btn" title="Monter"
+                    [disabled]="$index === 0" (click)="move($index, -1)"
+                  >↑</button>
+                  <button
+                    type="button" class="icon-btn" title="Descendre"
+                    [disabled]="$index === steps.length - 1" (click)="move($index, 1)"
+                  >↓</button>
+                  <button
+                    type="button" class="icon-btn icon-danger" title="Supprimer"
+                    (click)="remove($index)"
+                  >✕</button>
+                </div>
+              </div>
+
+              @if (openIndex() === $index) {
+                <div class="step-fields">
+                  @if (fieldsFor(step).length === 0) {
+                    <p class="hint">Cette étape n'a aucun champ à renseigner.</p>
+                  }
+
+                  @for (field of fieldsFor(step); track field.name) {
+
+                    @switch (field.type) {
+
+                      @case ('boolean') {
+                        <label class="check">
+                          <input
+                            type="checkbox"
+                            [checked]="bool(step, field.name)"
+                            (change)="setBool(step, field, $any($event.target).checked)"
+                          />
+                          <span>{{ field.label }}</span>
+                        </label>
+                      }
+
+                      @case ('multiline') {
+                        <label class="field">
+                          <span>{{ field.label }}{{ field.required ? ' *' : '' }}</span>
+                          <textarea
+                            rows="3"
+                            [value]="text(step, field.name)"
+                            (input)="setText(step, field, $any($event.target).value)"
+                          ></textarea>
+                        </label>
+                      }
+
+                      @case ('string-list') {
+                        <label class="field">
+                          <span>{{ field.label }} — une par ligne</span>
+                          <textarea
+                            rows="4"
+                            [value]="list(step, field.name)"
+                            (input)="setList(step, field, $any($event.target).value)"
+                          ></textarea>
+                        </label>
+                      }
+
+                      @case ('position') {
+                        @if (positionOf(step); as position) {
+                          <div class="field">
+                            <span>{{ field.label }}</span>
+                            <p class="position">
+                              {{ position }}
+                              <button type="button" class="link-btn" (click)="clearPosition(step)">
+                                cliquer au centre à la place
+                              </button>
+                            </p>
+                          </div>
+                        }
+                      }
+
+                      @default {
+                        <label class="field">
+                          <span>{{ field.label }}{{ field.required ? ' *' : '' }}</span>
+                          @if (field.name === 'variable' && loopVariables().length > 0) {
+                            <select
+                              [value]="text(step, field.name)"
+                              (change)="setText(step, field, $any($event.target).value)"
+                            >
+                              <option value="">(valeur fixe, pas de variable)</option>
+                              @for (name of loopVariables(); track name) {
+                                <option [value]="name">{{ name }}</option>
+                              }
+                            </select>
+                          } @else {
+                            <input
+                              [type]="field.type === 'number' ? 'number' : 'text'"
+                              [value]="text(step, field.name)"
+                              (input)="setText(step, field, $any($event.target).value)"
+                            />
+                          }
+                          @if (field.name === 'selector') {
+                            <em class="hint">
+                              Capturé sur le site à l'enregistrement. Le modifier à la main
+                              n'est utile que si vous savez à quel élément il correspond —
+                              sinon, réenregistrez le parcours.
+                            </em>
+                          }
+                        </label>
+                      }
+                    }
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ol>
+
+        <div class="add-step">
+          <label class="field-inline">
+            <span>Ajouter une étape</span>
+            <select #addSelect (change)="add(addSelect.value); addSelect.value = ''">
+              <option value="">Choisir…</option>
+              @for (action of addable(); track action.action) {
+                <option [value]="action.action">{{ action.label }}</option>
+              }
+            </select>
+          </label>
+          <em class="hint">
+            Les étapes qui visent un élément précis (clic, saisie, liste déroulante) ne
+            s'ajoutent pas à la main : leur sélecteur doit venir d'un enregistrement.
+          </em>
+        </div>
+
+        @if (variableDrafts.length > 0) {
+          <div class="variables">
+            <strong>Valeurs des variables</strong>
+            <p class="hint">
+              Une valeur par ligne. Le robot répète les étapes de la boucle une fois par
+              valeur. L'assistant ne peut pas les deviner — c'est à vous de les saisir.
+            </p>
+            @for (draft of variableDrafts; track draft.name) {
+              <label class="field">
+                <span>{{ draft.name }} — {{ valueCount(draft) }} valeur(s)</span>
+                <textarea
+                  rows="4"
+                  [(ngModel)]="draft.text"
+                  placeholder="ex.&#10;15/07/2026&#10;16/07/2026"
+                ></textarea>
+              </label>
+            }
+          </div>
+        }
+      </section>
+
+      <!-- ── Panneau de droite : conversation avec l'assistant ────────── -->
+      <app-assistant-chat
+        [robotId]="robotId"
+        (apply)="onAssistantProposal($event)"
+      />
+    </div>
+  }
+</main>

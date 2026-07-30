@@ -116,3 +116,76 @@ code, pre, .mono { font-family: var(--font-mono); }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ─── Contrôles — base commune ───────────────────────────────────────────
+   Les composants antérieurs redéfinissent ces règles localement ; leur
+   sélecteur porté par la portée du composant reste plus spécifique, donc rien
+   ne change pour eux. Les nouveaux composants s'appuient sur ces règles au
+   lieu d'en faire une septième copie (page « Modifier le parcours » et son
+   panneau de conversation). */
+.btn-primary, .btn-secondary {
+  height: 40px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+
+  &:hover:not(:disabled) { opacity: 0.85; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.btn-primary { background: var(--accent); color: var(--accent-on); }
+
+.btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+input[type="text"], input[type="number"], textarea, select {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-family: inherit;
+
+  &:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+
+/* Messages d'état et libellés de champ — même logique que les contrôles
+   ci-dessus : formes génériques réutilisées par toutes les pages, définies une
+   fois ici, redéfinissables localement par un composant qui en veut une variante. */
+.status { color: var(--text-mute); font-size: var(--text-sm); margin: 0; }
+.saved  { color: var(--success);   font-size: var(--text-sm); margin: 0; }
+.hint   { color: var(--text-mute); font-size: var(--text-xs); margin: 0; font-style: normal; }
+
+.error {
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+
+  > span { font-weight: 600; color: var(--text-mute); }
+}

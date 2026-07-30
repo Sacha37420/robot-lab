@@ -15,7 +15,9 @@ from .ai_pilot import MAX_ITERATIONS, PilotError, next_action
 from .downloads import list_downloads, resolve_download
 from .models import PROVIDER_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun
 from .serializers import AIProviderConfigSerializer, RobotSerializer
-from .steps import StepError, invented_selectors, loop_issues, validate_steps
+from .steps import (
+    StepError, invented_selectors, loop_issues, schema_payload, validate_steps,
+)
 
 _VALID_PROVIDERS = {key for key, _ in PROVIDER_CHOICES}
 
@@ -254,6 +256,45 @@ class RunDownloadView(APIView):
         return response
 
 
+class StepSchemaView(APIView):
+    """GET /api/step-schema/ — vocabulaire d'étapes pour l'éditeur manuel.
+
+    Sert la même source de vérité que le validateur et les prompts (`steps.py`),
+    pour que le frontend n'ait pas à tenir sa propre copie de la liste des champs.
+    """
+
+    def get(self, request):
+        return Response(schema_payload())
+
+
+# Bornes de l'historique de conversation renvoyé par le frontend. Il est
+# reconstruit à chaque appel côté client (rien n'est stocké en base), donc il
+# faut le borner ici : c'est une entrée utilisateur comme une autre, et elle
+# part dans un prompt facturé à la personne.
+MAX_HISTORY_TURNS = 20
+MAX_HISTORY_CHARS = 4000
+
+
+def _clean_history(raw):
+    """Valide l'historique de conversation. Silencieusement tronqué, pas rejeté :
+    un historique trop long est un détail d'affichage, pas une erreur de l'usager.
+    """
+    if not isinstance(raw, list):
+        return []
+    turns = []
+    for item in raw[-MAX_HISTORY_TURNS:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get('role')
+        content = item.get('content')
+        if role not in ('user', 'assistant') or not isinstance(content, str):
+            continue
+        content = content.strip()
+        if content:
+            turns.append({'role': role, 'content': content[:MAX_HISTORY_CHARS]})
+    return turns
+
+
 class AssistantView(APIView):
     """
     POST /api/robots/<id>/assistant/ — demande à l'IA une modification du parcours.
@@ -277,11 +318,16 @@ class AssistantView(APIView):
         if provider not in _VALID_PROVIDERS:
             return Response({'detail': f"Fournisseur inconnu : « {provider} »."}, status=400)
 
+        # Le parcours est renvoyé en entier à chaque tour, et fait foi : la
+        # personne peut l'avoir modifié à la main dans l'éditeur entre deux
+        # messages. Ne jamais se fier à une version vue plus haut dans la
+        # conversation.
         message = (
             f'Robot : {robot.name}\n'
             f'Description : {robot.description or "(aucune)"}\n'
             f'URL de départ : {robot.start_url}\n\n'
-            f'Parcours actuel :\n{json.dumps(robot.steps, ensure_ascii=False, indent=1)}\n\n'
+            f'Parcours actuel (état réel en base, fait foi) :\n'
+            f'{json.dumps(robot.steps, ensure_ascii=False, indent=1)}\n\n'
             f'Variables actuelles :\n{json.dumps(robot.variables, ensure_ascii=False, indent=1)}\n\n'
             f'Demande de la personne :\n{instruction}'
         )
@@ -289,6 +335,7 @@ class AssistantView(APIView):
         try:
             result = complete_json(
                 request.user.email, provider, prompts.SYSTEM, message, prompts.RESPONSE_SCHEMA,
+                history=_clean_history(request.data.get('history')),
             )
         except AINotConfigured as exc:
             return Response({'detail': str(exc)}, status=409)

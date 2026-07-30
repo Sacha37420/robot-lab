@@ -1,0 +1,245 @@
+.page-edit {
+  max-width: 1500px;
+  margin: var(--space-5) auto;
+  padding: 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+
+  h2 { margin: 0; }
+}
+
+.head-actions { display: flex; gap: var(--space-3); }
+
+/* Éditeur à gauche, conversation à droite. Le panneau de droite garde une
+   largeur lisible et ne se comprime pas ; sous 1100 px les deux passent l'un
+   au-dessus de l'autre, l'éditeur d'abord. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.editor {
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+app-assistant-chat {
+  display: block;
+  position: sticky;
+  top: var(--space-4);
+  height: calc(100vh - var(--nav-h) - var(--space-6));
+  min-height: 420px;
+}
+
+@media (max-width: 1100px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+
+  app-assistant-chat {
+    position: static;
+    height: 560px;
+  }
+}
+
+/* ─── Barre d'état / actions ─────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-title { font-weight: 600; font-size: var(--text-sm); }
+.toolbar-actions { display: flex; align-items: center; gap: var(--space-3); }
+
+.from-ai, .unsaved {
+  margin-left: var(--space-2);
+  font-style: normal;
+  font-weight: 400;
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+.from-ai  { background: var(--accent-tint); color: var(--accent-deep); }
+.unsaved  { background: var(--warning-tint); color: var(--warning); }
+
+/* ─── Liste des étapes ───────────────────────────────────────────────── */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.step-open { border-color: var(--accent); }
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+}
+
+.step-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: none;
+  background: none;
+  padding: var(--space-2) 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.step-num {
+  flex: none;
+  width: 26px;
+  color: var(--text-mute);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+}
+
+.step-kind {
+  flex: none;
+  font-weight: 600;
+  font-size: var(--text-xs);
+  color: var(--accent-deep);
+}
+
+.step-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-tools { flex: none; display: flex; gap: 2px; }
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: var(--text-sm);
+
+  &:hover:not(:disabled) { background: var(--card); color: var(--text); }
+  &:disabled { opacity: 0.3; cursor: not-allowed; }
+}
+
+.icon-danger:hover:not(:disabled) { color: var(--danger); background: var(--danger-tint); }
+
+.step-fields {
+  border-top: 1px solid var(--border);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--card);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.position {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-mute);
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+/* ─── Ajout d'étape / variables ──────────────────────────────────────── */
+.add-step, .variables {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.variables { gap: var(--space-3); }
+
+.warnings {
+  border-left: 3px solid var(--warning);
+  background: var(--warning-tint);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+
+  ul {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+}
+
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+
+  span { font-weight: 600; color: var(--text-mute); }
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+textarea { resize: vertical; }
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; }
+}
