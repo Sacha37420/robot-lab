@@ -3,7 +3,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { runAiTask } from './ai-pilot.js';
 import { captureInit } from './capture-script.js';
-import { describe, expand, runStep } from './replay.js';
+import { describe, expand, runStep, substitutePlaceholders } from './replay.js';
 
 const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || 'http://robot-lab-backend:8000';
 const ENGINE_KEY = process.env.ENGINE_INTERNAL_KEY || '';
@@ -307,6 +307,20 @@ async function uniqueName(directory, name) {
   return `${base}-${Date.now()}${ext}`;
 }
 
+/** Résout les `{{nom}}` d'un `ai_task` avec la mémoire accumulée jusqu'ici.
+ *  No-op sur toute autre action — seul `ai_task` porte du texte libre où un
+ *  `{{nom}}` peut apparaître (cf. steps.py). */
+function resolveMemoryPlaceholders(step, memory) {
+  if (step.action !== 'ai_task') return step;
+  return {
+    ...step,
+    objective: substitutePlaceholders(step.objective || '', memory),
+    expected_result: step.expected_result
+      ? substitutePlaceholders(step.expected_result, memory)
+      : step.expected_result,
+  };
+}
+
 /** Rejoue le parcours enregistré, en signalant chaque étape au client. */
 async function replay(ws, page, ticket, pendingDownloads) {
   let plan;
@@ -319,8 +333,20 @@ async function replay(ws, page, ticket, pendingDownloads) {
 
   send(ws, { type: 'plan', total: plan.length });
 
+  // Mémoire inter-étapes : ce qu'un `ai_task` a trouvé (`save_as`), relisible
+  // par un `ai_task` plus loin via `{{nom}}`. Ne peut pas se résoudre dans
+  // `expand()` (qui aplatit les boucles une bonne fois AVANT l'exécution) :
+  // une valeur mémorisée n'existe qu'une fois l'étape qui l'a produite déjà
+  // jouée — la substitution se fait donc ici, au fil du rejeu, en plus de
+  // celle des variables de boucle faite par `expand()`.
+  const memory = {};
+
   for (let i = 0; i < plan.length; i++) {
-    const step = plan[i];
+    // Résolu AVANT tout envoi : le journal (progression comme échec) doit
+    // montrer le texte tel qu'exécuté, pas les `{{nom}}` encore littéraux —
+    // sinon la personne verrait « {{maire}} » dans son propre journal alors
+    // que l'IA a bien reçu la vraie valeur mémorisée.
+    const step = resolveMemoryPlaceholders(plan[i], memory);
     send(ws, { type: 'progress', index: i + 1, total: plan.length, label: describe(step) });
     try {
       if (step.action === 'ai_task') {
@@ -331,6 +357,7 @@ async function replay(ws, page, ticket, pendingDownloads) {
         });
         if (!outcome.ok) throw new Error(outcome.note);
         send(ws, { type: 'ai_done', note: outcome.note });
+        if (step.save_as) memory[step.save_as] = outcome.note;
       } else {
         // runStep renvoie une note quand il a dû s'écarter du chemin nominal
         // (saisie frappe par frappe, liste masquée forcée…) : on la remonte

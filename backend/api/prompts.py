@@ -71,25 +71,50 @@ tout seul dans ce cas.
 - `press` — appuyer sur une touche. Champs : `selector` et `key` (obligatoires).
 - `ai_task` — déléguer une portion de navigation à une IA, pour ce qui ne peut pas \
 être figé en étapes (mise en page qui change, étape imprévisible, choix à faire au \
-vu de la page). Champs : `objective` (obligatoire — ce qu'il faut accomplir, décrit \
-concrètement), `expected_result` (à quoi on reconnaît que c'est fait).
+vu de la page, **recherche ouverte dont la source n'est pas connue à l'avance**). \
+Champs : `objective` (obligatoire — ce qu'il faut accomplir, décrit concrètement), \
+`expected_result` (à quoi on reconnaît que c'est fait), `save_as` (voir plus bas).
   Comment cette étape s'exécute, pour écrire de bons objectifs : au moment de \
 l'exécution, une IA reçoit tour par tour le titre de la page, son texte visible et \
 la **liste numérotée de ses éléments interactifs**, puis choisit une action (cliquer, \
-remplir, choisir une option, appuyer une touche, naviguer) jusqu'à déclarer l'objectif \
-atteint. Elle ne voit pas d'image de la page et ne peut agir que sur les éléments \
-listés. Un bon `objective` est donc formulé en termes de ce qui est visible et \
-actionnable sur la page (« accepter la bannière de cookies, quel que soit le libellé \
-du bouton »), pas en termes de position ou d'apparence (« cliquer le bouton en bas à \
-droite »). Un bon `expected_result` est un signe reconnaissable dans le texte de la \
-page (« la liste des factures est affichée »). Le nombre de tours est plafonné : un \
-objectif doit rester une portion courte du parcours, pas le parcours entier.
+remplir, choisir une option, appuyer une touche, **naviguer vers n'importe quelle \
+URL**) jusqu'à déclarer l'objectif atteint. Elle ne voit pas d'image de la page et ne \
+peut agir que sur les éléments listés. Un bon `objective` est donc formulé en termes \
+de ce qui est visible et actionnable sur la page (« accepter la bannière de cookies, \
+quel que soit le libellé du bouton »), pas en termes de position ou d'apparence \
+(« cliquer le bouton en bas à droite »). Un bon `expected_result` est un signe \
+reconnaissable dans le texte de la page (« la liste des factures est affichée »). Le \
+nombre de tours est plafonné : un objectif doit rester une portion courte du \
+parcours, pas le parcours entier.
+  **La navigation n'est pas limitée au site de départ** : un seul `ai_task` peut \
+décider de lui-même d'aller consulter une page Facebook, un moteur de recherche, un \
+site de presse locale ou le journal d'une commune si l'objectif le demande — décris \
+alors la recherche à faire et les sources à essayer (« chercher la profession de foi \
+de la liste menée par {{maire}} à {{commune}} : essayer d'abord sa page Facebook si \
+elle existe, sinon un moteur de recherche, sinon la presse locale ») plutôt que de \
+fixer une seule URL. Prévois dans `expected_result` le cas où rien n'est trouvé (« ou, \
+à défaut, dire clairement qu'aucune source n'a été trouvée ») : un `ai_task` n'échoue \
+pas juste parce que la première source est vide, mais il doit pouvoir renoncer \
+proprement plutôt que tourner sans fin. Attention : certains sites (réseaux sociaux, \
+moteurs de recherche) opposent une protection anti-robot (CAPTCHA, blocage des \
+navigateurs automatisés) qui peut faire échouer cette recherche indépendamment de la \
+qualité de l'objectif — un `ai_task` de ce genre doit rester tolérant à l'échec d'une \
+source et en essayer une autre plutôt que de considérer un blocage comme définitif.
   `ai_task` n'a pas de champ `variable` (son texte est libre, pas une valeur unique) : \
 pour faire varier son objectif d'un tour de boucle à l'autre, insère `{{nom}}` dans \
 `objective` ou `expected_result` — remplacé par la valeur courante à l'exécution, à \
 condition qu'un `loop_start` sur cette variable englobe l'étape. Un `{{nom}}` sans \
 boucle englobante reste tel quel, littéralement, dans l'objectif transmis à l'IA \
 d'exécution : évite ce cas, il ne fait rien de ce que la personne attend.
+  `save_as` (optionnel) nomme le résultat de cette étape (`result`, ce que l'IA \
+d'exécution a trouvé) pour qu'un `ai_task` **plus loin** dans le parcours puisse le \
+relire, avec la même syntaxe `{{nom}}` que pour une variable de boucle — utile pour \
+enchaîner deux recherches (« trouve le nom de la tête de liste » → `save_as: maire` ; \
+puis un second `ai_task` dont l'objectif contient `{{maire}}`). Le nom ne doit pas \
+déjà être pris par une variable de boucle ouverte à cet endroit du parcours — sinon, \
+lequel des deux serait utilisé serait ambigu. Dans une boucle, `save_as` est réécrit à \
+chaque tour : une étape après la boucle ne voit que la dernière valeur mémorisée, pas \
+l'historique de toutes.
 - `loop_start` — début d'une boucle. Champs : `variable` (obligatoire — le nom de la \
 variable qui prend successivement chaque valeur), `values` (la liste des valeurs).
 - `loop_end` — fin de la boucle ouverte par le dernier `loop_start`.
@@ -164,6 +189,7 @@ RESPONSE_SCHEMA = {
                     'key': {'type': 'string'},
                     'objective': {'type': 'string'},
                     'expected_result': {'type': 'string'},
+                    'save_as': {'type': 'string'},
                     'values': {'type': 'array', 'items': {'type': 'string'}},
                     # Recopié à l'identique depuis l'étape existante — le modèle
                     # ne doit jamais inventer de coordonnées (cf. prompt).

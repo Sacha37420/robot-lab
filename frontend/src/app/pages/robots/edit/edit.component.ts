@@ -286,7 +286,8 @@ export class EditComponent implements OnInit {
       case 'press':      return `Appuyer sur ${step.key} dans ${step.selector}`;
       case 'scroll':     return `Faire défiler jusqu'à ${step.y ?? 0} px`;
       case 'dialog':     return `Boîte « ${step.message ?? ''} » : ${step.accept ? 'Accepter' : 'Refuser'}`;
-      case 'ai_task':    return `Tâche IA : ${step.objective}`;
+      case 'ai_task':    return `Tâche IA : ${step.objective}`
+        + (step.save_as ? ` (mémorisé sous « ${step.save_as} »)` : '');
       case 'loop_start': return `Début de boucle sur « ${step.variable} »`;
       case 'loop_end':   return 'Fin de boucle';
       default:           return step.action;

@@ -44,6 +44,9 @@ export interface RobotStep {
   accept?: boolean;
   objective?: string;
   expected_result?: string;
+  /** Nomme le résultat de cette tâche IA pour qu'un `ai_task` plus loin dans
+   *  le parcours puisse le relire via `{{nom}}`. */
+  save_as?: string;
   values?: string[];
   /** HTML capturé autour de l'élément à l'enregistrement, du plus étroit au
    *  plus large — contexte donné à l'assistant de modification, jamais

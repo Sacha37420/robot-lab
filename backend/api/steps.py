@@ -17,6 +17,11 @@ import re
 # détecte un placeholder orphelin (aucune boucle englobante ne le lie).
 VARIABLE_PLACEHOLDER = re.compile(r'\{\{\s*([a-zA-Z0-9_]+)\s*\}\}')
 
+# Même jeu de caractères que le nom capturé par VARIABLE_PLACEHOLDER : un
+# `save_as` qui ne matcherait pas ce format ne pourrait de toute façon jamais
+# être relu par un `{{nom}}`.
+NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_]+$')
+
 # Étapes qui ciblent un élément précis : seules celles-là portent un `context`
 # (HTML capturé autour de l'élément à l'enregistrement — cf. `CONTEXT_LEVELS`
 # plus bas). Un `goto`/`scroll`/`dialog` n'a pas d'élément à situer.
@@ -49,7 +54,10 @@ STEP_SCHEMA = {
     # enregistrée telle que l'utilisateur y a répondu.
     'dialog':     {'kind', 'message', 'accept', 'value'},
     # Lot 5 — l'IA pilote elle-même cette portion de navigation.
-    'ai_task':    {'objective', 'expected_result'},
+    # `save_as` : nomme le résultat (`finish.result`) pour qu'un `ai_task` PLUS
+    # LOIN dans le parcours puisse le relire via `{{ce_nom}}` — cf. section
+    # « Mémoire inter-étapes ».
+    'ai_task':    {'objective', 'expected_result', 'save_as'},
     'loop_start': {'variable', 'values'},
     'loop_end':   set(),
 }
@@ -90,6 +98,7 @@ FIELD_TYPES = {
     'y':               'number',
     'values':          'string-list',
     'position':        'position',
+    'save_as':         'string',
 }
 
 FIELD_LABELS = {
@@ -109,6 +118,7 @@ FIELD_LABELS = {
     'y':               'Défilement vertical (px)',
     'values':          'Valeurs à parcourir',
     'position':        "Point d'impact du clic",
+    'save_as':         'Mémoriser le résultat sous ce nom (réutilisable via {{nom}} plus loin)',
 }
 
 ACTION_LABELS = {
@@ -245,6 +255,17 @@ def validate_steps(steps):
                     f'{CONTEXT_MAX_LEVELS} chaînes de {CONTEXT_MAX_CHARS} caractères chacune.'
                 )
 
+        # `save_as` finit dans un `{{nom}}` relu par une étape plus loin : mêmes
+        # contraintes de forme que le nom capturé par VARIABLE_PLACEHOLDER,
+        # sinon il ne pourrait jamais être référencé.
+        if action == 'ai_task' and 'save_as' in step:
+            save_as = step['save_as']
+            if not isinstance(save_as, str) or not NAME_PATTERN.match(save_as):
+                raise StepError(
+                    f'Étape {index} (ai_task) : save_as doit être un nom '
+                    f'(lettres, chiffres, tiret bas), sans espace ni accent.'
+                )
+
         if action == 'loop_start':
             depth += 1
         elif action == 'loop_end':
@@ -272,6 +293,11 @@ def loop_issues(steps, variables=None):
     variables = variables or {}
     issues = []
     open_loops = []  # variables des boucles ouvertes à ce point du parcours
+    # Noms mémorisés par un `ai_task.save_as` rencontré PLUS TÔT dans le
+    # parcours — un `{{nom}}` peut légitimement viser l'un ou l'autre (une
+    # variable de boucle ouverte, ou une mémoire déjà écrite), jamais les deux
+    # en même temps (cf. contrôle de conflit plus bas).
+    known_memory = set()
 
     for index, step in enumerate(steps, 1):
         if not isinstance(step, dict):
@@ -299,16 +325,31 @@ def loop_issues(steps, variables=None):
             )
         elif action == 'ai_task':
             # Un `{{nom}}` dans le texte d'une tâche IA suit la même règle
-            # qu'un `variable` orphelin : sans boucle englobante sur ce nom,
-            # `expand()` le laisse tel quel — l'IA recevrait littéralement
-            # « {{commune}} » comme objectif au lieu de la valeur attendue.
+            # qu'un `variable` orphelin : sans boucle englobante NI mémoire
+            # déjà écrite sur ce nom, il reste littéral au lieu d'être résolu
+            # — l'IA recevrait « {{commune}} » comme objectif au mot près.
             text = f"{step.get('objective', '')} {step.get('expected_result', '')}"
             for name in VARIABLE_PLACEHOLDER.findall(text):
-                if name not in open_loops:
+                if name not in open_loops and name not in known_memory:
                     issues.append(
                         f"Étape {index} : référence « {{{{{name}}}}} » alors qu'aucune "
-                        f"boucle ouverte ne lie cette variable."
+                        f"boucle ouverte ni mémoire d'étape précédente ne fournit cette valeur."
                     )
+
+            save_as = step.get('save_as')
+            if save_as:
+                if save_as in open_loops:
+                    # Même nom pour une variable de boucle et une mémoire : lequel
+                    # des deux verrait `{{nom}}` résolu dépendrait de l'ordre des
+                    # deux substitutions (boucle à l'aplatissement, mémoire à
+                    # l'exécution) — ambigu par construction, à corriger plutôt
+                    # qu'à laisser deviner.
+                    issues.append(
+                        f"Étape {index} : save_as « {save_as} » porte le même nom que "
+                        f"la variable de boucle ouverte « {save_as} » — choisissez un "
+                        f"nom différent pour éviter toute ambiguïté."
+                    )
+                known_memory.add(save_as)
 
     return issues
 

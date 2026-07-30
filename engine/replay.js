@@ -23,7 +23,7 @@ const VARIABLE_PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
  *  silencieuse (même choix que pour un `variable` orphelin sur `fill`/`select`,
  *  cf. `loop_issues()` côté backend, qui détecte ce même cas ici).
  */
-function substitutePlaceholders(text, bindings) {
+export function substitutePlaceholders(text, bindings) {
   return text.replace(VARIABLE_PLACEHOLDER, (match, name) => (
     bindings[name] !== undefined ? bindings[name] : match
   ));
