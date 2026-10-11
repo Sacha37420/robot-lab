@@ -2,7 +2,6 @@
 pilote IA, client IA (tentatives), fichiers téléchargés."""
 import json
 import os
-import unittest
 from datetime import timedelta
 from unittest import mock
 
@@ -477,13 +476,13 @@ class PiloteIATests(CasRobot):
         self.assertEqual(self._etape(run_id=999999).status_code, 404)
         self.assertEqual(self.recus, [])
 
-    # DÉFAUT DE PRODUCTION (contrat I4, non corrigé) : `get_object_or_404(RobotRun,
-    # pk=request.data.get('run_id'))` laisse remonter un ValueError quand `run_id`
-    # n'est pas un nombre — réponse 500 au lieu d'un 400/404. Portée faible : la vue
-    # n'est atteinte qu'avec la clé du moteur. À retirer quand api/views.py valide run_id.
-    @unittest.expectedFailure
-    def test_run_id_non_numerique_ne_fait_pas_une_erreur_500(self):
-        self.assertIn(self._etape(run_id='abc').status_code, (400, 404))
+    def test_run_id_mal_forme_refuse_proprement(self):
+        """Corrigé le 2026-10-11 : un run_id non numérique donnait une erreur 500."""
+        for run_id in ('abc', '', None, -1, 1.5, True, [self.run.id], {'id': self.run.id}):
+            with self.subTest(run_id=run_id):
+                self.assertEqual(self._etape(run_id=run_id).status_code, 400)
+        self.assertEqual(self.recus, [])
+        self.assertEqual(self._etape(run_id=str(self.run.id)).status_code, 200)
 
     def test_execution_sans_fournisseur_ou_sans_cle(self):
         RobotRun.objects.update(ai_provider='')

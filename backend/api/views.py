@@ -248,7 +248,10 @@ class AIStepView(APIView):
         if not settings.ENGINE_INTERNAL_KEY or key != settings.ENGINE_INTERNAL_KEY:
             return Response({'detail': 'Clé invalide.'}, status=403)
 
-        run = get_object_or_404(RobotRun, pk=request.data.get('run_id'))
+        run_id = request.data.get('run_id')
+        if isinstance(run_id, bool) or not str(run_id).isdigit():
+            return Response({'detail': 'run_id invalide.'}, status=400)
+        run = get_object_or_404(RobotRun, pk=int(run_id))
         if not run.ai_provider:
             return Response(
                 {'detail': "Aucun fournisseur IA n'a été choisi pour cette exécution."},
