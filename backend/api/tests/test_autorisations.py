@@ -214,6 +214,21 @@ class VuesInternesTests(CasRobot):
             for r in self._toutes(c):
                 self.assertEqual(r.status_code, 403)
 
+    def test_cle_non_ascii_refusee_sans_erreur(self):
+        # La comparaison à temps constant (hmac.compare_digest) refuse les chaînes
+        # non ASCII par une exception : la vue doit répondre 403, pas 500.
+        for r in self._toutes(moteur('clé-accentuée-€')):
+            self.assertEqual(r.status_code, 403)
+        with override_settings(ENGINE_INTERNAL_KEY='clé-du-moteur-accentuée'):
+            self.assertEqual(self._toutes(moteur('cle-du-moteur-accentuee'))[0].status_code, 403)
+            self.assertEqual(self._toutes(moteur('clé-du-moteur-accentuée'))[0].status_code, 200)
+
+    def test_la_comparaison_de_la_cle_est_a_temps_constant(self):
+        with mock.patch('api.views.hmac.compare_digest', wraps=__import__('hmac').compare_digest) as compare:
+            for r in self._toutes(moteur('x' * 35)):
+                self.assertEqual(r.status_code, 403)
+        self.assertEqual(compare.call_count, 2)
+
     def test_lecture_refusee(self):
         for route in ('/api/internal/verify-ticket/', '/api/internal/ai-step/'):
             self.assertEqual(moteur().get(route).status_code, 405)

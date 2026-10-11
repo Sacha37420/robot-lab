@@ -1,3 +1,4 @@
+import hmac
 import json
 
 from django.conf import settings
@@ -186,6 +187,18 @@ class RunResultView(APIView):
         return Response({'ok': True})
 
 
+def _engine_key_ok(request) -> bool:
+    """Secret partagé de `engine/` (header X-Engine-Key), comparé à temps
+    constant. Une clé non configurée côté serveur ferme tout : « vide == vide »
+    n'est jamais une clé valide. Comparaison en octets : `compare_digest` lève
+    TypeError sur une chaîne non ASCII, ce qui ferait une erreur 500."""
+    expected = settings.ENGINE_INTERNAL_KEY
+    if not expected:
+        return False
+    key = request.headers.get('X-Engine-Key', '')
+    return hmac.compare_digest(key.encode(), expected.encode())
+
+
 class VerifyTicketView(APIView):
     """
     POST /api/internal/verify-ticket/ — appelé par `engine/`, jamais par un
@@ -200,8 +213,7 @@ class VerifyTicketView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        key = request.headers.get('X-Engine-Key', '')
-        if not settings.ENGINE_INTERNAL_KEY or key != settings.ENGINE_INTERNAL_KEY:
+        if not _engine_key_ok(request):
             return Response({'detail': 'Clé invalide.'}, status=403)
 
         token = (request.data.get('token') or '').strip()
@@ -244,8 +256,7 @@ class AIStepView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        key = request.headers.get('X-Engine-Key', '')
-        if not settings.ENGINE_INTERNAL_KEY or key != settings.ENGINE_INTERNAL_KEY:
+        if not _engine_key_ok(request):
             return Response({'detail': 'Clé invalide.'}, status=403)
 
         run_id = request.data.get('run_id')
