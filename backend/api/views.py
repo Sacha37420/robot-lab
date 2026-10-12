@@ -179,6 +179,13 @@ class RunResultView(APIView):
         if status not in _RUN_STATUSES or status == 'running':
             return Response({'detail': f"Statut de résultat invalide : « {status} »."}, status=400)
 
+        # Un résultat consigné est définitif : il sert de « dernier test » à
+        # l'éditeur et à l'assistant, il ne se réécrit pas après coup.
+        if run.status != 'running':
+            return Response(
+                {'detail': 'Le résultat de cette exécution est déjà consigné.'}, status=409,
+            )
+
         run.status = status
         run.log = _clean_run_log(request.data.get('log'))
         run.error_message = (request.data.get('message') or '').strip()[:2000]

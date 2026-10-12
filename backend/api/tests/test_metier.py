@@ -138,9 +138,11 @@ class ResultatExecutionTests(CasRobot):
     def test_journal_borne(self):
         gros = [{'index': i, 'label': 'x', 'state': 'done'} for i in range(views.MAX_RUN_LOG_LINES + 50)]
         self.alice.post(self.url, {'status': 'success', 'log': gros}, format='json')
-        self.assertEqual(len(RobotRun.objects.get().log), views.MAX_RUN_LOG_LINES)
-        self.alice.post(self.url, {'status': 'success', 'log': 'pas une liste'}, format='json')
-        self.assertEqual(RobotRun.objects.get().log, [])
+        self.assertEqual(len(RobotRun.objects.get(pk=self.run_id).log), views.MAX_RUN_LOG_LINES)
+        autre = self.alice.post(f'/api/robots/{self.pk}/run-ticket/', {}, format='json').json()['run_id']
+        self.alice.post(f'/api/robots/{self.pk}/runs/{autre}/result/',
+                        {'status': 'success', 'log': 'pas une liste'}, format='json')
+        self.assertEqual(RobotRun.objects.get(pk=autre).log, [])
 
     def test_resume_du_dernier_test_pour_l_assistant(self):
         run = RobotRun.objects.get()
@@ -155,6 +157,22 @@ class ResultatExecutionTests(CasRobot):
         self.assertIn('Étape 2 en échec : Cliquer #entrer — introuvable', resume)
         self.assertIn('délai dépassé', resume)
         self.assertNotIn('Ouvrir', resume)
+
+    def test_le_resultat_d_un_run_termine_n_est_plus_reecrivable(self):
+        premier = {'status': 'failed', 'message': 'délai dépassé',
+                   'log': [{'index': 1, 'label': 'Cliquer', 'state': 'failed'}]}
+        self.assertEqual(self.alice.post(self.url, premier, format='json').status_code, 200)
+        avant = RobotRun.objects.values('status', 'log', 'error_message', 'finished_at').get()
+        for statut in ('success', 'failed', 'stopped', 'error'):
+            with self.subTest(statut=statut):
+                r = self.alice.post(self.url, {'status': statut, 'log': [], 'message': 'réécrit'}, format='json')
+                self.assertEqual(r.status_code, 409)
+        self.assertEqual(RobotRun.objects.values('status', 'log', 'error_message', 'finished_at').get(), avant)
+        # Une nouvelle exécution du même robot reçoit son propre résultat.
+        suivant = self.alice.post(f'/api/robots/{self.pk}/run-ticket/', {}, format='json').json()['run_id']
+        r = self.alice.post(f'/api/robots/{self.pk}/runs/{suivant}/result/', {'status': 'success'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.alice.get(f'/api/robots/{self.pk}/').json()['last_run']['status'], 'success')
 
 
 class ValidateurEtapesTests(CasRobot):
