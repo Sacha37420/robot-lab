@@ -295,6 +295,36 @@ class ValidateurEtapesTests(CasRobot):
         self.assertEqual(requis, {'selector', 'key'})
 
 
+class MotDePasseJamaisEnregistreTests(CasRobot):
+    """`masked` = champ mot de passe, « valeur non enregistrée » : une telle étape
+    ne porte jamais de valeur (steps.FIELD_LABELS, engine/capture-script.js)."""
+
+    def test_etape_masquee_avec_valeur_refusee(self):
+        for etape in ({'action': 'fill', 'selector': '#mdp', 'masked': True, 'value': 'hunter2'},
+                      {'action': 'fill', 'selector': '#mdp', 'masked': True, 'value': 'hunter2', 'variable': 'v'}):
+            with self.subTest(etape=etape):
+                with self.assertRaises(steps.StepError):
+                    steps.validate_steps([etape])
+
+    def test_etapes_acceptees(self):
+        for etape in ({'action': 'fill', 'selector': '#mdp', 'masked': True},
+                      {'action': 'fill', 'selector': '#mdp', 'masked': True, 'context': ['<input type="password">']},
+                      {'action': 'fill', 'selector': '#q', 'masked': False, 'value': 'bonjour'},
+                      {'action': 'fill', 'selector': '#q', 'value': 'bonjour'}):
+            with self.subTest(etape=etape):
+                steps.validate_steps([etape])
+
+    def test_l_api_ne_stocke_pas_de_mot_de_passe_dans_un_parcours(self):
+        pk = creer_robot(self.alice)['id']
+        parcours = PARCOURS + [{'action': 'fill', 'selector': '#mdp', 'masked': True, 'value': 'hunter2'}]
+        r = self.alice.patch(f'/api/robots/{pk}/', {'steps': parcours}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertNotIn('hunter2', r.content.decode())
+        self.assertEqual(Robot.objects.get().steps, PARCOURS)
+        r = self.alice.post('/api/robots/', {'name': 'r', 'start_url': 'https://x.test/', 'steps': parcours}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+
 def _reponse_ia(**champs):
     return {'steps': [dict(s) for s in PARCOURS if s['action'] != 'fill'], 'variables': {},
             'explanation': ' étape retirée ', **champs}

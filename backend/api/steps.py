@@ -231,6 +231,18 @@ def validate_steps(steps):
                 if key in step and not isinstance(step[key], (int, float)):
                     raise StepError(f'Étape {index} (scroll) : {key} doit être un nombre.')
 
+        # `masked` marque un champ mot de passe, dont la valeur n'est jamais
+        # enregistrée (garde-fou de capture d'`engine/`, libellé de FIELD_LABELS,
+        # consigne des prompts) : une étape masquée qui porterait une valeur
+        # stockerait un mot de passe en clair dans le parcours — et le rejeu la
+        # refuse de toute façon. Le message ne reprend pas la valeur.
+        if action == 'fill' and step.get('masked') and step.get('value'):
+            raise StepError(
+                f'Étape {index} (fill) : un champ mot de passe (masked) ne porte pas de '
+                f'valeur — elle n\'est jamais enregistrée. Retirez la valeur, ou décochez '
+                f'« mot de passe » si ce champ n\'en est pas un.'
+            )
+
         # `accept` décide d'un clic sur « OK » ou « Annuler » dans une boîte du
         # navigateur : une valeur ambiguë (chaîne « false », 0…) ne doit pas être
         # interprétée au hasard, une confirmation peut porter sur une suppression.
