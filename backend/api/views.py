@@ -19,6 +19,7 @@ from .models import (
     PROVIDER_CHOICES, RUN_STATUS_CHOICES, AIProviderConfig, EngineTicket, Robot, RobotRun,
 )
 from .serializers import AIProviderConfigSerializer, RobotSerializer
+from .url_policy import raison_refus
 from .steps import (
     StepError, invented_selectors, last_run_summary, loop_issues, restore_context,
     schema_payload, steps_for_prompt, validate_steps,
@@ -65,6 +66,15 @@ class AIProviderConfigView(APIView):
         return Response(AIProviderConfigSerializer(config).data)
 
 
+def _start_url_refusee(robot):
+    """Un robot enregistré avant le filtre du Lot 2 peut porter une URL de départ
+    désormais refusée : on ne la modifie pas, on refuse d'ouvrir une session."""
+    raison = raison_refus(robot.start_url)
+    if raison:
+        return Response({'detail': f"URL de départ refusée : {raison}"}, status=400)
+    return None
+
+
 class RecordingTicketView(APIView):
     """
     POST /api/robots/<id>/recording-ticket/ — émet un ticket à usage unique
@@ -76,6 +86,9 @@ class RecordingTicketView(APIView):
         robot = get_object_or_404(Robot, pk=pk)
         if robot.owner_email != request.user.email:
             raise PermissionDenied("Ce robot ne vous appartient pas.")
+        refus = _start_url_refusee(robot)
+        if refus:
+            return refus
 
         # Purge légère : un ticket non consommé et périmé n'a plus d'utilité.
         EngineTicket.objects.filter(
@@ -100,6 +113,9 @@ class RunTicketView(APIView):
             return Response(
                 {'detail': "Ce robot n'a pas encore de parcours enregistré."}, status=400,
             )
+        refus = _start_url_refusee(robot)
+        if refus:
+            return refus
 
         provider = (request.data.get('provider') or '').strip()
         if provider and provider not in _VALID_PROVIDERS:

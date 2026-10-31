@@ -3,10 +3,10 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { runAiTask } from './ai-pilot.js';
 import { captureInit } from './capture-script.js';
+import { chromiumLaunchOptions, installRouteGuard, startEgressProxy } from './egress-proxy.js';
 import { describe, expand, runStep, substitutePlaceholders } from './replay.js';
+import { createGuard } from './url-guard.js';
 
-const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || 'http://robot-lab-backend:8000';
-const ENGINE_KEY = process.env.ENGINE_INTERNAL_KEY || '';
 const DOWNLOAD_ROOT = process.env.ROBOT_DOWNLOAD_ROOT || '/downloads';
 const VIEWPORT = { width: 1280, height: 800 };
 // Fenêtre laissée à un téléchargement pour DÉMARRER après la dernière étape (un
@@ -18,22 +18,6 @@ const DOWNLOAD_CAP_MS = Number(process.env.ROBOT_DOWNLOAD_CAP_MS || 180000);
 // Temps laissé à l'utilisateur pour répondre à une boîte de dialogue pendant
 // l'enregistrement. La page est bloquée tant qu'elle n'est pas fermée.
 const DIALOG_TIMEOUT_MS = Number(process.env.ROBOT_DIALOG_TIMEOUT_MS || 120000);
-
-async function verifyTicket(token) {
-  // Un backend lent/injoignable ne doit jamais bloquer `busy` indéfiniment —
-  // fetch() n'a pas de timeout par défaut, on en pose un explicitement.
-  const res = await fetch(`${BACKEND_URL}/api/internal/verify-ticket/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Engine-Key': ENGINE_KEY },
-    body: JSON.stringify({ token }),
-    signal: AbortSignal.timeout(5000),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Ticket refusé (${res.status})`);
-  }
-  return res.json();
-}
 
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -49,16 +33,37 @@ function send(ws, payload) {
 /** Lancement du navigateur + vue live. Borné dans le temps : un ticket vérifié
  * mais un backend/site de départ qui traîne ne doit jamais laisser `busy`
  * bloqué indéfiniment côté server.js. */
-async function setup(ws, token, steps) {
-  const ticket = await verifyTicket(token);
+async function setup(ws, ticket, steps, egress) {
   const isRun = ticket.mode === 'run';
   let pendingDownloads = null;
 
-  const browser = await chromium.launch({ headless: true });
+  // Le robot ne joint qu'Internet (Lot 2). Deux couches, même filtre :
+  //  - le proxy de sortie, par où passe TOUT le trafic de Chromium (WebSocket,
+  //    workers compris) et qui se connecte à l'adresse vérifiée ;
+  //  - context.route, qui fait échouer net (ERR_BLOCKED_BY_CLIENT) une
+  //    navigation refusée au lieu d'afficher la page 403 du proxy.
+  const guard = createGuard();
+  const signalled = new Set();
+  const onBlocked = (url, reason) => {
+    let key = url;
+    try { key = new URL(url).host; } catch { /* clé brute */ }
+    if (signalled.has(key)) return;
+    signalled.add(key);
+    send(ws, { type: 'note', note: `destination refusée (${reason})` });
+  };
+
+  const start = await guard.check(ticket.start_url);
+  if (!start.ok) throw new Error(`URL de départ refusée : ${start.reason}`);
+
+  egress.proxy = await startEgressProxy({ guard, onBlocked });
+
+  const browser = await chromium.launch(chromiumLaunchOptions(egress.proxy));
+  egress.browser = browser;
   const context = await browser.newContext({
     viewport: VIEWPORT,
     acceptDownloads: isRun,
   });
+  await installRouteGuard(context, guard, onBlocked);
   const page = await context.newPage();
 
   // Les boîtes de dialogue concernent les DEUX modes : à l'enregistrement pour
@@ -388,14 +393,17 @@ async function replay(ws, page, ticket, pendingDownloads) {
 }
 
 /** Une session = un ticket = un navigateur. Ferme tout proprement dans tous les cas. */
-export async function runSession(ws, token) {
+export async function runSession(ws, ticket) {
   let browser = null;
   let cdp = null;
   let pendingDownloads = null;
   const steps = [];
+  // Rempli par setup() au fil de l'eau : si l'initialisation dépasse son délai,
+  // le proxy et le navigateur déjà lancés sont quand même fermés.
+  const egress = { proxy: null, browser: null };
 
   try {
-    const setupResult = await withTimeout(setup(ws, token, steps), 20000, 'Initialisation de la session');
+    const setupResult = await withTimeout(setup(ws, ticket, steps, egress), 20000, 'Initialisation de la session');
     browser = setupResult.browser;
     cdp = setupResult.cdp;
     pendingDownloads = setupResult.pendingDownloads;
@@ -437,6 +445,8 @@ export async function runSession(ws, token) {
     }
     if (cdp) await cdp.send('Page.stopScreencast').catch(() => {});
     if (browser) await browser.close().catch(() => {});
+    else if (egress.browser) await egress.browser.close().catch(() => {});
+    if (egress.proxy) await egress.proxy.close().catch(() => {});
     try { ws.close(1000, 'session ended'); } catch { /* déjà fermée */ }
   }
 }

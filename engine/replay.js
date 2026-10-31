@@ -1,6 +1,8 @@
 // Rejeu d'un parcours enregistré. Le vocabulaire d'étapes est celui de
 // backend/api/steps.py — toute évolution se fait là-bas d'abord.
 
+import { assertNavigable } from './url-guard.js';
+
 const STEP_TIMEOUT_MS = 15000;
 // `reveal()` n'est qu'un coup de pouce optimiste : le vrai contrôle
 // d'actionnabilité est fait par l'action elle-même. Lui laisser le timeout
@@ -191,6 +193,7 @@ export async function runStep(page, step) {
 
   switch (step.action) {
     case 'goto':
+      assertNavigable(step.url);
       await page.goto(step.url, { waitUntil: 'domcontentloaded', ...options });
       return;
 

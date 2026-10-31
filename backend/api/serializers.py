@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import AIProviderConfig, Robot
 from .steps import StepError, loop_issues, validate_steps
+from .url_policy import raison_refus
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -51,6 +52,14 @@ class RobotSerializer(serializers.ModelSerializer):
     def get_last_run(self, obj):
         run = obj.runs.exclude(status='running').first()
         return LastRunSerializer(run).data if run else None
+
+    def validate_start_url(self, value):
+        # Le robot ne joint qu'Internet (Lot 2) : le filtre résolvant les noms
+        # est dans engine/, celui-ci refuse ce qui se lit dans l'URL.
+        raison = raison_refus(value)
+        if raison:
+            raise serializers.ValidationError(raison)
+        return value
 
     def validate_steps(self, value):
         # Même validateur que pour les étapes proposées par l'IA : rien qui ne

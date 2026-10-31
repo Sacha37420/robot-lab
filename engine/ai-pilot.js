@@ -6,6 +6,7 @@
 // plafond d'itérations.
 
 import { selectorFor, summarize } from './page-summary.js';
+import { assertNavigable } from './url-guard.js';
 
 const BACKEND_URL = process.env.BACKEND_INTERNAL_URL || 'http://robot-lab-backend:8000';
 const ENGINE_KEY = process.env.ENGINE_INTERNAL_KEY || '';
@@ -47,6 +48,8 @@ async function applyAction(page, action) {
       await page.press(selectorFor(args.index), args.key, options);
       return `touche ${args.key} envoyée`;
     case 'navigate':
+      // L'URL vient du modèle, donc potentiellement d'une page lue par lui.
+      assertNavigable(args.url);
       await page.goto(args.url, { waitUntil: 'domcontentloaded', ...options });
       return 'navigation effectuée';
     default:

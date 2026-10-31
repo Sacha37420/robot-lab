@@ -61,12 +61,26 @@ services:
 
   # Moteur d'enregistrement/exécution Playwright (vue live WebSocket + CDP) —
   # Chromium isolé ici, jamais dans l'image backend (cf. CLAUDE.md, runner/).
-  # Un seul navigateur à la fois (mutex interne, engine/server.js).
+  # Un seul navigateur à la fois (mutex interne, engine/app.js).
+  # Il reste sur sso-net (Caddy) et dev-net (backend) : ce qui l'empêche de
+  # joindre un service du lab est le filtre de sortie de Chromium
+  # (engine/url-guard.js, engine/egress-proxy.js), pas le réseau.
   engine:
     build: ./engine
     container_name: robot-lab-engine
     restart: unless-stopped
-    env_file: .env
+    # Uniquement les variables que lit engine/ (process.env de session.js,
+    # ticket.js, ai-pilot.js). `env_file: .env` lui donnait SECRET_KEY — qui est
+    # aussi la clé de chiffrement des clés IA (backend/api/fields.py) — et
+    # DB_PASSWORD, alors que la page qu'il affiche est choisie par l'utilisateur.
+    # Une valeur vide laisse le défaut du code.
+    environment:
+      ENGINE_INTERNAL_KEY: ${ENGINE_INTERNAL_KEY:-}
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-}
+      ROBOT_DOWNLOAD_ROOT: ${ROBOT_DOWNLOAD_ROOT:-}
+      ROBOT_DOWNLOAD_GRACE_MS: ${ROBOT_DOWNLOAD_GRACE_MS:-}
+      ROBOT_DOWNLOAD_CAP_MS: ${ROBOT_DOWNLOAD_CAP_MS:-}
+      ROBOT_DIALOG_TIMEOUT_MS: ${ROBOT_DIALOG_TIMEOUT_MS:-}
     ports:
       - "8095:4300"
     volumes:
