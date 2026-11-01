@@ -1,10 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-
-interface EnvWindow {
-  __env?: { apiUrl?: string; engineUrl?: string };
-}
+import { apiUrl, engineUrl } from './env';
 
 export type AIProvider = 'claude' | 'mistral';
 
@@ -130,13 +127,11 @@ export class ApiService {
   private http = inject(HttpClient);
 
   private get base(): string {
-    return (window as unknown as EnvWindow).__env?.apiUrl
-      ?? 'http://localhost:8094';
+    return apiUrl();
   }
 
   get engineUrl(): string {
-    return (window as unknown as EnvWindow).__env?.engineUrl
-      ?? 'ws://localhost:8095';
+    return engineUrl();
   }
 
   getAiConfig(provider: AIProvider): Observable<AIProviderConfig> {

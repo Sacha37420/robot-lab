@@ -60,11 +60,31 @@ Jamais fait faute de clé.
 - [ ] Les trois parcours aboutissent ; coût relevé
 **Vérifié le :**
 
-## Lot 5 — Gabarit front, documentation et chemin à portes   ·   statut : à faire
+## Lot 5 — Gabarit front, documentation et chemin à portes   ·   statut : en cours
 **Objectif :** même comportement que le gabarit corrigé (T3), un README, un déploiement par le moteur (T1).
 **Tâches :**
-- [ ] Polices en chemin relatif ; `tokenBases()` ; PKCE. Le `redirectUri` est déjà sur la page courante.
+- [x] Polices en chemin relatif (`frontend/src/styles.scss`, `url("/assets/…")` → `url("assets/…")`)
+- [x] `tokenBases()` dans `core/auth.interceptor.ts` (`core/env.ts` : la seule API de l'app — l'engine n'est joint que par WebSocket avec un ticket, jamais avec le jeton ; `core/token-scope.ts`, copie de lab-admin)
+- [x] `redirectUri` borné à l'origine et au préfixe de l'app (`core/redirect-uri.ts`, copie de lab-admin ; il était `window.location.href` sans contrôle)
+- [x] `pkceMethod: 'S256'` (front) — `--pkce` sur le client reste à poser par l'architecte après déploiement
+- [x] Ports publiés liés à `${LAB_BIND_ADDR:-127.0.0.1}` (chantier « failles », I1) — backend 8094, frontend 4212, engine 8095
 - [ ] `README.md` : architecture backend et engine, ce que l'engine peut joindre, clés IA
 **Tests à passer avant de clore le lot :**
 - [ ] `validate-app.sh robot-lab --quality-only` vert ; cloisonnement `ok` par le moteur
-**Vérifié le :**
+**Vérifié le :** 2026-11-01 — non déployé. Chantier « failles » (secteur E) : image candidate `robot-lab-frontend:candidat` construite (depuis une copie propre du dossier, sans `node_modules`) ; le bundle porte `pkceMethod:"S256"`, les WOFF2 sont référencés en `./media/…` (0 `/assets/fonts`) ; `docker compose config` rend `host_ip: 127.0.0.1` pour 8094, 4212 et 8095 (engine). Les tests du lot demandent le déploiement. Reste le README.
+
+## Lot 6 — Coffre des secrets sous une clé propre (`VAULT_ENCRYPTION_KEY`)   ·   statut : livré
+**Objectif :** les secrets chiffrés de l'app (clés IA Claude et Mistral de chaque utilisateur) ne dépendent plus de `SECRET_KEY` (chantier « failles », F7 → I3).
+**Constat [C] :** `EncryptedTextField` dérivait sa clé Fernet de `SECRET_KEY` et rendait **le texte chiffré** quand le
+déchiffrement échouait : faire tourner `SECRET_KEY` détruisait en silence les secrets, une fuite de `SECRET_KEY` les livrait.
+**Tâches :**
+- [x] `backend/api/fields.py` : chiffrement sous `VAULT_ENCRYPTION_KEY` (`config/settings.py`, sans valeur par défaut) ;
+  lecture de l'ancien chiffrement par `MultiFernet` ; valeur indéchiffrable traitée comme absente (journalisée sans sa
+  valeur), sauf valeur historique en clair (pas de forme `gAAAAA…`)
+- [x] Migration de données `backend/api/migrations/0007_rechiffrer_coffre.py` : rechiffre chaque valeur lisible (ancienne clé ou clair) en SQL brut ; laisse en base
+  l'indéchiffrable ; rejouable ; retour arrière = remise sous l'ancienne clé
+**Tests à passer avant de clore le lot :**
+- [x] `backend/api/tests/test_coffre.py` : chiffré sous la nouvelle clé et pas sous l'ancienne ; ancienne valeur relue puis rechiffrée ; clair
+  historique relu puis rechiffré ; valeur corrompue ou d'une autre clé → absente, journal sans la valeur ; rotation de
+  `SECRET_KEY` sans perte ; clé absente des réponses de l'API
+**Vérifié le :** 2026-11-01 — non déployé. `bash chantiers/tests/essai.sh robot-lab` : 107 tests OK (9 dans `tests/test_coffre.py`). `makemigrations --check` signale une dérive antérieure sans rapport (`id` de `engineticket`, `robot`, `robotrun`), pas le coffre.

@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8094:8000"
+      - "${LAB_BIND_ADDR:-127.0.0.1}:8094:8000"
     volumes:
       - downloads:/downloads
     networks:
@@ -51,7 +51,7 @@ services:
       PORT_ENGINE: ${PORT_ENGINE:-}
       PORT_FRONTEND: ${PORT_FRONTEND:-}
     ports:
-      - "4212:80"
+      - "${LAB_BIND_ADDR:-127.0.0.1}:4212:80"
     networks:
       - sso-net
     labels:
@@ -82,7 +82,7 @@ services:
       ROBOT_DOWNLOAD_CAP_MS: ${ROBOT_DOWNLOAD_CAP_MS:-}
       ROBOT_DIALOG_TIMEOUT_MS: ${ROBOT_DIALOG_TIMEOUT_MS:-}
     ports:
-      - "8095:4300"
+      - "${LAB_BIND_ADDR:-127.0.0.1}:8095:4300"
     volumes:
       - downloads:/downloads
     networks:

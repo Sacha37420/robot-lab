@@ -6,6 +6,9 @@ from decouple import config
 
 # ── Sécurité ──────────────────────────────────────────────────────────────────
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-robot_lab-change-in-production')
+# Clé du coffre (api/fields.py) — distincte de SECRET_KEY, sans valeur par défaut :
+# un secret chiffré ne doit jamais dépendre d'une clé qu'on fait tourner.
+VAULT_ENCRYPTION_KEY = config('VAULT_ENCRYPTION_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
 
