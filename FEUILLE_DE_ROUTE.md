@@ -70,7 +70,7 @@ Jamais fait faute de clé.
 - [x] Ports publiés liés à `${LAB_BIND_ADDR:-127.0.0.1}` (chantier « failles », I1) — backend 8094, frontend 4212, engine 8095
 - [ ] `README.md` : architecture backend et engine, ce que l'engine peut joindre, clés IA
 **Tests à passer avant de clore le lot :**
-- [ ] `validate-app.sh robot-lab --quality-only` vert ; cloisonnement `ok` par le moteur
+- [x] `validate-app.sh robot-lab --quality-only` vert ; cloisonnement `ok` par le moteur — 2026-11-08 : `validate-app.sh --quality-only` (copie jetable, `valq.sh`) code 0 ; `scripts/app-status.sh robot-lab` rend `cloisonnement: ok` pour le déploiement `75f78da` du 2026-11-01
 **Vérifié le :** 2026-11-01 — non déployé. Chantier « failles » (secteur E) : image candidate `robot-lab-frontend:candidat` construite (depuis une copie propre du dossier, sans `node_modules`) ; le bundle porte `pkceMethod:"S256"`, les WOFF2 sont référencés en `./media/…` (0 `/assets/fonts`) ; `docker compose config` rend `host_ip: 127.0.0.1` pour 8094, 4212 et 8095 (engine). Les tests du lot demandent le déploiement. Reste le README.
 
 ## Lot 6 — Coffre des secrets sous une clé propre (`VAULT_ENCRYPTION_KEY`)   ·   statut : livré
